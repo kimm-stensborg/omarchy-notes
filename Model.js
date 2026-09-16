@@ -540,14 +540,8 @@ function plainLine(body) {
     .trim()
 }
 
-// omarchy-notification-send reads its options before the headline, so a
-// headline that is exactly one of its flags would be eaten as one. Only an
-// exact match can be: "-50% off" arrives as a single argument and is text.
-var NOTIFY_FLAG_RE = /^(?:-[gupirt]|--(?:glyph|urgency|app-name|icon|image|replace-id|expire-time|print-id|exec))$/
-
-// The note said in a line or two, for the reminder notification: the first
-// line that has anything on it as the headline, the next few as the body.
-function noteSummary(text) {
+// The note said in a few lines, marks off and its bullets and boxes kept.
+function noteLines(text) {
   var lines = parseLines(text)
   var kept = []
   for (var i = 0; i < lines.length && kept.length < 4; i++) {
@@ -557,9 +551,24 @@ function noteSummary(text) {
     else if (lines[i].kind === "bullet") body = "• " + body
     kept.push(body)
   }
-  var title = kept.length ? clip(kept[0], 60) : "Note"
-  if (NOTIFY_FLAG_RE.test(title)) title = "Note"
-  return { title: title, body: clip(kept.slice(1).join("\n"), 180) }
+  return kept
+}
+
+// What the reminder notification says. The headline names the kind of thing
+// it is, because that is the first question a toast sliding in has to answer;
+// the note goes in the body under the time it was due, so one that waited
+// while you were away still says when it went off rather than just turning up.
+//
+// The note's own text only ever lands in the body now.
+// omarchy-notification-send reads its options before the positionals, so a
+// headline or body that is exactly one of its flags would be taken as one --
+// this body always opens with the clock, and the headline is a constant, so
+// neither can be.
+function reminderNotification(text, whenMs) {
+  var kept = noteLines(text)
+  var head = clockLabel(whenMs) + "  ·  " + (kept.length ? clip(kept[0], 60) : "Note")
+  var rest = clip(kept.slice(1).join("\n"), 180)
+  return { title: "Note reminder", body: rest ? head + "\n" + rest : head }
 }
 
 // -------------------------------------------------------------- navigation

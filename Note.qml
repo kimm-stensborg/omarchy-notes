@@ -75,9 +75,21 @@ Item {
       ? Border.hyprlandActiveSpec(card.accent, card.borderWidth)
       : Border.surfaceSpec("menu", "border", Color.menu.border, card.borderWidth))
 
-  // Reading sizes: the body a step up from the bar's, headings above it.
-  readonly property int textSize: Style.font.title
-  readonly property int headingSize: Style.font.heading
+  // Reading sizes. A note is read at arm's length rather than glanced at in
+  // the bar, so the body is two steps up from it and a heading is half as
+  // big again, which is the gap that makes a heading read as one.
+  readonly property int textSize: Style.font.heading
+  readonly property int headingSize: Style.font.display
+
+  // The card's padding. The corner labels -- the reminder, and the monitor a
+  // borrowed note is away from -- live in the band reserved at the foot of
+  // it, so they sit in the padding rather than over the last line of text.
+  readonly property int padX: Style.spacing.xxxl
+  readonly property int padY: Style.spacing.xxl
+  // Reserved whether a label is showing or not, so setting a reminder never
+  // reflows the text; the gap keeps the label off the line above it, which
+  // a scrolling note cuts through wherever it happens to fall.
+  readonly property int footerHeight: Math.round(Style.font.caption * 1.5) + Style.spacing.lg
 
   // The dragged copy must stay visible even off its own screen, or it would
   // lose the pointer grab.
@@ -207,10 +219,10 @@ Item {
       id: body
       anchors {
         fill: parent
-        topMargin: surface.contentTopInset + Style.spacing.lg
-        leftMargin: surface.contentLeftInset + Style.spacing.xl
-        rightMargin: surface.contentRightInset + Style.spacing.xl
-        bottomMargin: surface.contentBottomInset + Style.spacing.lg
+        topMargin: surface.contentTopInset + card.padY
+        leftMargin: surface.contentLeftInset + card.padX
+        rightMargin: surface.contentRightInset + card.padX
+        bottomMargin: surface.contentBottomInset + card.padY + card.footerHeight
       }
       clip: true
 
@@ -513,8 +525,8 @@ Item {
       visible: card.remindText !== "" && !card.confirming && !card.reminding
       anchors.left: parent.left
       anchors.bottom: parent.bottom
-      anchors.leftMargin: surface.contentLeftInset + Style.spacing.md
-      anchors.bottomMargin: surface.contentBottomInset + Style.spacing.xs
+      anchors.leftMargin: surface.contentLeftInset + card.padX
+      anchors.bottomMargin: surface.contentBottomInset + card.padY
       spacing: Style.spacing.xs
 
       Text {
@@ -537,8 +549,8 @@ Item {
       visible: !!card.placement && card.placement.away && !card.confirming
       anchors.right: parent.right
       anchors.bottom: parent.bottom
-      anchors.rightMargin: surface.contentRightInset + Style.spacing.md
-      anchors.bottomMargin: surface.contentBottomInset + Style.spacing.xs
+      anchors.rightMargin: surface.contentRightInset + card.padX
+      anchors.bottomMargin: surface.contentBottomInset + card.padY
       text: "↩ " + (card.placement ? card.placement.homeLabel : "")
       color: Util.alpha(card.accent, 0.8)
       font.family: card.fontFamily
@@ -557,7 +569,7 @@ Item {
       Column {
         anchors.centerIn: parent
         spacing: Style.spacing.lg
-        width: parent.width - Style.spacing.xl * 2
+        width: parent.width - card.padX * 2
 
         Text {
           width: parent.width
@@ -660,7 +672,7 @@ Item {
       Column {
         anchors.centerIn: parent
         spacing: Style.spacing.md
-        width: parent.width - Style.spacing.xl * 2
+        width: parent.width - card.padX * 2
 
         Text {
           width: parent.width

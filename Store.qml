@@ -167,11 +167,13 @@ Item {
   // The notification carries the command to run when it is clicked, as argv
   // rather than a shell line, so the note's own text can never be a command.
   function fireReminder(note) {
+    // Said before the note is touched, so the toast carries the time it was
+    // due rather than the time the shell got round to it.
+    var said = Model.reminderNotification(note.text, Model.remindAt(note))
     root.update(note.id, { remind: "" }, false)
-    var said = Model.noteSummary(note.text)
     Quickshell.execDetached([
       root.omarchyPath + "/bin/omarchy-notification-send",
-      "--app-name", "Notes", "-g", "󰢌", "-u", "critical",
+      "--app-name", "Notes", "-g", "\uf0f3", "-u", "critical",
       said.title, said.body,
       "--exec", "omarchy-shell", "shell", "summon", root.pluginId,
       JSON.stringify({ focus: note.id })

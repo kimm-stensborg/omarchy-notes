@@ -387,22 +387,25 @@ test("dueNotes and nextRemind pick out what is ready and what is waiting", () =>
   assert.strictEqual(M.remindAt({ remind: "whenever" }), 0)
 })
 
-test("noteSummary gives a notification its headline and body, marks off", () => {
-  const s = M.noteSummary("# **Standup**\n\nwith *Dan*\n- Purchase files\n[x] done\n[ ] todo")
-  assert.strictEqual(s.title, "Standup")
-  assert.strictEqual(s.body, "with Dan\n• Purchase files\n✓ done")
-  for (const empty of ["", "\n\n  \n"]) {
-    assert.strictEqual(M.noteSummary(empty).title, "Note")
-    assert.strictEqual(M.noteSummary(empty).body, "")
+test("reminderNotification names the kind, then the time and the note", () => {
+  const at = M.parseWhen("14:30", NOON)
+  const n = M.reminderNotification("# **Standup**\n\nwith *Dan*\n- Purchase files\n[x] done\n[ ] todo", at)
+  assert.strictEqual(n.title, "Note reminder")
+  assert.strictEqual(n.body, "14:30  ·  Standup\nwith Dan\n• Purchase files\n✓ done")
+  // an empty note still says when it was due
+  assert.strictEqual(M.reminderNotification("", at).body, "14:30  ·  Note")
+  assert.strictEqual(M.reminderNotification("\n\n  \n", at).body, "14:30  ·  Note")
+  // a note of one line has no second half
+  assert.strictEqual(M.reminderNotification("just this", at).body, "14:30  ·  just this")
+  // the headline is a constant and the body always opens with the clock, so
+  // neither can be read as one of omarchy-notification-send's own flags
+  for (const flagish of ["-u", "--exec", "-50% off"]) {
+    const f = M.reminderNotification(flagish, at)
+    assert.strictEqual(f.title, "Note reminder")
+    assert.ok(/^\d/.test(f.body), "body must start with the clock: " + f.body)
   }
-  // a headline that is exactly one of omarchy-notification-send's flags would
-  // be read as an option, so it is not used as one
-  assert.strictEqual(M.noteSummary("-u").title, "Note")
-  assert.strictEqual(M.noteSummary("--exec").title, "Note")
-  // but a line that merely starts with a dash is text, and kept
-  assert.strictEqual(M.noteSummary("-50% off").title, "-50% off")
   // long lines are clipped rather than filling the toast
-  assert.ok(M.noteSummary("x".repeat(200)).title.length <= 60)
+  assert.ok(M.reminderNotification("x".repeat(200), at).body.length <= 80)
 })
 
 test("nearestTo picks the note closest to a point", () => {
