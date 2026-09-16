@@ -387,16 +387,23 @@ test("dueNotes and nextRemind pick out what is ready and what is waiting", () =>
   assert.strictEqual(M.remindAt({ remind: "whenever" }), 0)
 })
 
-test("reminderNotification names the kind, then the time and the note", () => {
+test("reminderNotification says the time and the note's first line, alone", () => {
   const at = M.parseWhen("14:30", NOON)
-  const n = M.reminderNotification("# **Standup**\n\nwith *Dan*\n- Purchase files\n[x] done\n[ ] todo", at)
+  const n = M.reminderNotification("# **Standup**\n\nwith *Dan*\n- Purchase files", at)
   assert.strictEqual(n.title, "Note reminder")
-  assert.strictEqual(n.body, "14:30  ·  Standup\nwith Dan\n• Purchase files\n✓ done")
+  // the first line and nothing under it -- the note itself is a click away
+  assert.strictEqual(n.body, "14:30  ·  Standup")
+  // a blank opening line is skipped, and a bullet or a box keeps its mark
+  assert.strictEqual(M.reminderNotification("\n\n- Kimm\n- Dan", at).body, "14:30  ·  • Kimm")
+  assert.strictEqual(M.reminderNotification("[x] done\nmore", at).body, "14:30  ·  ✓ done")
+  assert.strictEqual(M.reminderNotification("[ ] todo", at).body, "14:30  ·  ☐ todo")
   // an empty note still says when it was due
   assert.strictEqual(M.reminderNotification("", at).body, "14:30  ·  Note")
   assert.strictEqual(M.reminderNotification("\n\n  \n", at).body, "14:30  ·  Note")
-  // a note of one line has no second half
-  assert.strictEqual(M.reminderNotification("just this", at).body, "14:30  ·  just this")
+  // a long first line is capped at 50, the ellipsis counted in
+  const long = M.reminderNotification("x".repeat(200), at)
+  assert.strictEqual(long.body, "14:30  ·  " + "x".repeat(49) + "…")
+  assert.strictEqual(M.firstLine("y".repeat(50)).length, 50)
   // the headline is a constant and the body always opens with the clock, so
   // neither can be read as one of omarchy-notification-send's own flags
   for (const flagish of ["-u", "--exec", "-50% off"]) {
@@ -404,8 +411,6 @@ test("reminderNotification names the kind, then the time and the note", () => {
     assert.strictEqual(f.title, "Note reminder")
     assert.ok(/^\d/.test(f.body), "body must start with the clock: " + f.body)
   }
-  // long lines are clipped rather than filling the toast
-  assert.ok(M.reminderNotification("x".repeat(200), at).body.length <= 80)
 })
 
 test("zoomFit blows a note up as far as it fits, and no further", () => {

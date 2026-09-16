@@ -551,35 +551,38 @@ function plainLine(body) {
     .trim()
 }
 
-// The note said in a few lines, marks off and its bullets and boxes kept.
-function noteLines(text) {
+// The note in a line: the first one with anything on it, marks taken off
+// and its bullet or its box kept.
+function firstLine(text) {
   var lines = parseLines(text)
-  var kept = []
-  for (var i = 0; i < lines.length && kept.length < 4; i++) {
+  for (var i = 0; i < lines.length; i++) {
     var body = plainLine(lines[i].body)
     if (!body) continue
-    if (lines[i].kind === "check") body = (lines[i].check ? "✓ " : "☐ ") + body
-    else if (lines[i].kind === "bullet") body = "• " + body
-    kept.push(body)
+    if (lines[i].kind === "check") return (lines[i].check ? "✓ " : "☐ ") + body
+    if (lines[i].kind === "bullet") return "• " + body
+    return body
   }
-  return kept
+  return ""
 }
 
 // What the reminder notification says. The headline names the kind of thing
 // it is, because that is the first question a toast sliding in has to answer;
-// the note goes in the body under the time it was due, so one that waited
-// while you were away still says when it went off rather than just turning up.
+// under it goes the time the note was due -- so one that waited while you
+// were away still says when it went off -- and the line the note opens with.
+// That one line is enough to know which note is asking for you; the note
+// itself is a click away, and reading it there is the point.
 //
-// The note's own text only ever lands in the body now.
+// The note's own text only ever lands in the body.
 // omarchy-notification-send reads its options before the positionals, so a
 // headline or body that is exactly one of its flags would be taken as one --
 // this body always opens with the clock, and the headline is a constant, so
 // neither can be.
 function reminderNotification(text, whenMs) {
-  var kept = noteLines(text)
-  var head = clockLabel(whenMs) + "  ·  " + (kept.length ? clip(kept[0], 60) : "Note")
-  var rest = clip(kept.slice(1).join("\n"), 180)
-  return { title: "Note reminder", body: rest ? head + "\n" + rest : head }
+  var first = firstLine(text)
+  return {
+    title: "Note reminder",
+    body: clockLabel(whenMs) + "  ·  " + (first ? clip(first, 50) : "Note")
+  }
 }
 
 // -------------------------------------------------------------- navigation
