@@ -40,6 +40,11 @@ Item {
   property string selectedId: ""
   // The note waiting on a yes/no before it is deleted.
   property string confirmingId: ""
+  // The note whose reminder is being set.
+  property string remindingId: ""
+  // Ticks while the board is up, so the reminder a note shows counts down
+  // instead of going stale under you.
+  property double now: Date.now()
   // Alt+T lays them out in a grid, and lets them flow back home again. It
   // is a way of looking at the board, not a change to it -- no note moves
   // on disk -- but the choice itself is remembered by the store, so the
@@ -106,6 +111,8 @@ Item {
 
   // ------------------------------------------------------------- lifecycle
 
+  // A payload of { focus: <id> } opens the board on that note -- how a
+  // clicked reminder notification brings you back to the note that rang.
   function open(payloadJson) {
     var focused = Hyprland.focusedMonitor ? String(Hyprland.focusedMonitor.name) : ""
     root.activeScreen = focused
@@ -114,8 +121,21 @@ Item {
     root.editingId = ""
     root.selectedId = ""
     root.confirmingId = ""
+    root.remindingId = ""
+    root.now = Date.now()
     if (root.store) root.store.refreshMonitors()
     root.opened = true
+
+    var wanted = ""
+    try { wanted = String((JSON.parse(payloadJson || "{}") || {}).focus || "") } catch (e) { wanted = "" }
+    // The screens settle a frame or two after the windows appear, so the
+    // note is picked once there are placements to pick it from.
+    if (wanted) Qt.callLater(function() { root.focusNote(wanted) })
+  }
+
+  function focusNote(id) {
+    if (!root.store || !root.store.get(id)) return
+    root.select(id)
   }
 
   function close() {
@@ -124,6 +144,7 @@ Item {
     root.editingId = ""
     root.selectedId = ""
     root.confirmingId = ""
+    root.remindingId = ""
   }
 
   function dismiss() {
@@ -235,6 +256,28 @@ Item {
 
   function cancelDelete() { root.confirmingId = "" }
 
+  // ------------------------------------------------------------- reminders
+
+  // Alt+R. The sheet opens on the note you are on, showing the time it
+  // already has, if any.
+  function askRemind(id) {
+    var target = id || root.selectedId
+    if (!target || !root.placements[target]) return
+    root.select(target)
+    root.editingId = ""
+    root.confirmingId = ""
+    root.now = Date.now()
+    root.remindingId = target
+  }
+
+  function setRemind(id, whenMs) {
+    if (!root.store) return
+    root.store.setRemind(id, whenMs)
+    root.remindingId = ""
+  }
+
+  function cancelRemind() { root.remindingId = "" }
+
   // -------------------------------------------------------------- dragging
 
   function beginDrag(id, source, pgx, pgy) {
@@ -268,6 +311,14 @@ Item {
       }
     }
     root.drag = null
+  }
+
+  Timer {
+    running: root.opened
+    interval: 20000
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: root.now = Date.now()
   }
 
   // Windows exist only while the board is open, and follow the connected

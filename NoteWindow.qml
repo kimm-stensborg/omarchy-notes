@@ -146,7 +146,7 @@ PanelWindow {
           text: {
             if (win.store && win.store.lastDeleted) return "Deleted  ·  Ctrl+Z to undo"
             if (win.overlay.tiled) return "Alt+T to let them flow back"
-            return "N add  ·  Alt+T tile  ·  Del delete  ·  Esc close"
+            return "N add  ·  Alt+R remind  ·  Alt+T tile  ·  Del delete  ·  Esc close"
           }
           color: Util.alpha(Color.foreground, 0.6)
           font.family: win.fontFamily
@@ -172,6 +172,12 @@ PanelWindow {
         return
       }
 
+      // The reminder sheet has the keyboard; its own field answers for it.
+      if (win.overlay.remindingId !== "") {
+        event.accepted = true
+        return
+      }
+
       if (alt && (event.key === Qt.Key_Left || event.key === Qt.Key_Right
                   || event.key === Qt.Key_Up || event.key === Qt.Key_Down)) {
         win.overlay.moveSelection(event.key === Qt.Key_Left ? "left"
@@ -180,6 +186,9 @@ PanelWindow {
         event.accepted = true
       } else if (alt && event.key === Qt.Key_T) {
         win.overlay.toggleTile()
+        event.accepted = true
+      } else if (alt && event.key === Qt.Key_R) {
+        win.overlay.askRemind("")
         event.accepted = true
       } else if (event.key === Qt.Key_Delete) {
         win.overlay.askDelete("")

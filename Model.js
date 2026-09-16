@@ -22,6 +22,15 @@ function str(v) { return v === undefined || v === null ? "" : String(v).trim() }
 function num(v, d) { var n = Number(v); return isFinite(n) ? n : d }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 
+// A date we can read back, or nothing. Anything unreadable is dropped
+// rather than kept, so a reminder is either a time or absent.
+function isoOrEmpty(v) {
+  var t = str(v)
+  if (!t) return ""
+  var ms = Date.parse(t)
+  return isFinite(ms) ? new Date(ms).toISOString() : ""
+}
+
 // ---------------------------------------------------------------- monitors
 
 // A monitor is known by what it is, not where it is plugged in: DP-5 and
@@ -70,6 +79,7 @@ function sanitizeNote(raw, i) {
     y: clamp(num(raw.y, 0.1), 0, 1),
     w: clamp(Math.round(num(raw.w, DEFAULT_W)), MIN_W, MAX_W),
     h: clamp(Math.round(num(raw.h, DEFAULT_H)), MIN_H, MAX_H),
+    remind: isoOrEmpty(raw.remind),
     created: str(raw.created),
     updated: str(raw.updated)
   }
@@ -408,6 +418,148 @@ function inlineMarkup(body, accentHex) {
   t = t.replace(/\*([^*]+)\*/g, "<i>$1</i>")
   t = t.replace(/(^|[^\w])_([^_]+)_(?![\w])/g, "$1<i>$2</i>")
   return t
+}
+
+// -------------------------------------------------------------- reminders
+
+// A note carries the one time it is to come back to you, as an ISO string.
+// It is one-shot: firing it clears the note's reminder.
+
+var DAY_MS = 86400000
+
+function remindAt(note) {
+  var ms = Date.parse(str(note && note.remind))
+  return isFinite(ms) ? ms : 0
+}
+
+// hh:mm on the day dayOffset days from now, in local time, so "9:00" means
+// nine o'clock where you are and not nine o'clock UTC.
+function atClock(nowMs, hh, mm, dayOffset) {
+  var d = new Date(nowMs)
+  d.setDate(d.getDate() + dayOffset)
+  d.setHours(hh, mm, 0, 0)
+  return d.getTime()
+}
+
+function unitMs(unit) {
+  var u = str(unit).charAt(0)
+  if (u === "h") return 3600000
+  if (u === "d") return DAY_MS
+  return 60000
+}
+
+// What someone types into the reminder field -> a timestamp in ms, or 0 when
+// it says nothing we understand. A bare number is minutes, which is what
+// gets typed when you are in a hurry. Understood:
+//   45  45m  90 mins  2h  1.5h  1h30  3d  9:00  14.30  tomorrow  tomorrow 8:30
+// with a leading "in" or "at" allowed on any of them.
+function parseWhen(text, nowMs) {
+  var t = str(text).toLowerCase().replace(/^(?:in|at)\s+/, "")
+  if (!t) return 0
+  var m
+
+  // tomorrow, on its own or at a time; nine in the morning unless told otherwise
+  if ((m = /^tomorrow(?:\s+(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?)?$/.exec(t))) {
+    var th = m[1] === undefined ? 9 : Number(m[1])
+    var tm = m[2] === undefined ? 0 : Number(m[2])
+    return th > 23 || tm > 59 ? 0 : atClock(nowMs, th, tm, 1)
+  }
+
+  // a clock time: today while it is still to come, else the same time tomorrow
+  if ((m = /^(\d{1,2})[:.](\d{2})$/.exec(t))) {
+    var hh = Number(m[1]), mm = Number(m[2])
+    if (hh > 23 || mm > 59) return 0
+    var when = atClock(nowMs, hh, mm, 0)
+    return when > nowMs ? when : atClock(nowMs, hh, mm, 1)
+  }
+
+  // an hour and a half, written the way a clock reads it
+  if ((m = /^(\d+)\s*h(?:ours?|rs?)?\s*(\d+)\s*(?:m(?:in(?:ute)?s?)?)?$/.exec(t)))
+    return nowMs + Number(m[1]) * 3600000 + Number(m[2]) * 60000
+
+  if ((m = /^(\d+(?:\.\d+)?)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)?$/.exec(t))) {
+    var n = Number(m[1])
+    return n > 0 ? nowMs + Math.round(n * unitMs(m[2])) : 0
+  }
+
+  return 0
+}
+
+function clockLabel(ms) {
+  var d = new Date(ms)
+  return d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2)
+}
+
+// What the note says about its reminder. Close at hand it counts down, which
+// is the question you are actually asking; further off it is the time you
+// set, which is the thing you remember setting.
+function remindLabel(ms, nowMs) {
+  if (!ms) return ""
+  var left = ms - nowMs
+  if (left <= 0) return "due"
+  if (left < 3600000) return "in " + Math.max(1, Math.round(left / 60000)) + "m"
+  if (ms < atClock(nowMs, 0, 0, 1)) return "at " + clockLabel(ms)
+  if (ms < atClock(nowMs, 0, 0, 2)) return "tomorrow " + clockLabel(ms)
+  return "in " + Math.round(left / DAY_MS) + "d"
+}
+
+// The notes whose time has come, soonest first. A note whose reminder passed
+// while the shell was down is due the moment the file is read again.
+function dueNotes(notes, nowMs) {
+  var out = []
+  for (var i = 0; i < (notes || []).length; i++) {
+    var at = remindAt(notes[i])
+    if (at && at <= nowMs) out.push(notes[i])
+  }
+  return out.sort(function(a, b) { return remindAt(a) - remindAt(b) })
+}
+
+// When to wake next, or 0 when nothing is waiting.
+function nextRemind(notes, nowMs) {
+  var best = 0
+  for (var i = 0; i < (notes || []).length; i++) {
+    var at = remindAt(notes[i])
+    if (at && at > nowMs && (!best || at < best)) best = at
+  }
+  return best
+}
+
+function clip(s, n) {
+  s = str(s)
+  return s.length > n ? s.slice(0, n - 1) + "…" : s
+}
+
+// Strip the marks off a line, leaving what it says.
+function plainLine(body) {
+  return String(body || "")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/~~([^~]*)~~/g, "$1")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .replace(/__([^_]*)__/g, "$1")
+    .replace(/\*([^*]*)\*/g, "$1")
+    .trim()
+}
+
+// omarchy-notification-send reads its options before the headline, so a
+// headline that is exactly one of its flags would be eaten as one. Only an
+// exact match can be: "-50% off" arrives as a single argument and is text.
+var NOTIFY_FLAG_RE = /^(?:-[gupirt]|--(?:glyph|urgency|app-name|icon|image|replace-id|expire-time|print-id|exec))$/
+
+// The note said in a line or two, for the reminder notification: the first
+// line that has anything on it as the headline, the next few as the body.
+function noteSummary(text) {
+  var lines = parseLines(text)
+  var kept = []
+  for (var i = 0; i < lines.length && kept.length < 4; i++) {
+    var body = plainLine(lines[i].body)
+    if (!body) continue
+    if (lines[i].kind === "check") body = (lines[i].check ? "✓ " : "☐ ") + body
+    else if (lines[i].kind === "bullet") body = "• " + body
+    kept.push(body)
+  }
+  var title = kept.length ? clip(kept[0], 60) : "Note"
+  if (NOTIFY_FLAG_RE.test(title)) title = "Note"
+  return { title: title, body: clip(kept.slice(1).join("\n"), 180) }
 }
 
 // -------------------------------------------------------------- navigation

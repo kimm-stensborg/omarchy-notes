@@ -16,6 +16,9 @@ Item {
 
   readonly property string pluginId: "io.github.kimm-stensborg.notes"
   readonly property string notesPath: Quickshell.env("HOME") + "/Documents/notes.json"
+  // Injected by omarchy-shell once the service is loaded; the env var is the
+  // value until then, and must stay writable for the shell to set it.
+  property string omarchyPath: Quickshell.env("OMARCHY_PATH")
 
   property var notes: []
   // Changes only when a note is added or removed, or the file is replaced
@@ -72,6 +75,7 @@ Item {
       monitor: root.monitorFor(monitorName),
       x: fx, y: fy,
       w: Model.DEFAULT_W, h: Model.DEFAULT_H,
+      remind: "",
       created: now, updated: now
     }, 0)
     root.pendingEditId = note.id
@@ -122,6 +126,64 @@ Item {
     saveTimer.restart()
   }
 
+  // ------------------------------------------------------------- reminders
+  //
+  // A reminder is a time on the note itself, so it is written down with the
+  // note and outlives the shell. This half of the plugin is kept loaded
+  // whether the board is up or not, which is what makes it the right place
+  // to watch the clock: reminders arrive while you are working elsewhere.
+
+  // whenMs of 0 takes the reminder off.
+  function setRemind(id, whenMs) {
+    root.update(id, { remind: whenMs ? new Date(whenMs).toISOString() : "" }, false)
+    root.armReminders()
+  }
+
+  // Sleep until the next reminder is due, and no longer than a minute, so a
+  // note edited in the file by hand -- or a laptop waking from suspend with
+  // the clock moved on -- is never missed by much.
+  function armReminders() {
+    var now = Date.now()
+    // Anything already due rings on the next turn of the event loop rather
+    // than on the next tick: a note that fell due while the shell was down
+    // should arrive as the file is read, not up to a minute afterwards.
+    var wait = 1
+    if (Model.dueNotes(root.notes, now).length === 0) {
+      var next = Model.nextRemind(root.notes, now)
+      wait = next ? Math.max(200, Math.min(60000, next - now)) : 60000
+    }
+    remindTimer.interval = wait
+    remindTimer.restart()
+  }
+
+  function checkReminders() {
+    var due = Model.dueNotes(root.notes, Date.now())
+    for (var i = 0; i < due.length; i++) root.fireReminder(due[i])
+    root.armReminders()
+  }
+
+  // A reminder is one-shot: it is cleared as it goes off, so a note that was
+  // due while the shell was down rings once on the way back up, not forever.
+  // The notification carries the command to run when it is clicked, as argv
+  // rather than a shell line, so the note's own text can never be a command.
+  function fireReminder(note) {
+    root.update(note.id, { remind: "" }, false)
+    var said = Model.noteSummary(note.text)
+    Quickshell.execDetached([
+      root.omarchyPath + "/bin/omarchy-notification-send",
+      "--app-name", "Notes", "-g", "󰢌", "-u", "critical",
+      said.title, said.body,
+      "--exec", "omarchy-shell", "shell", "summon", root.pluginId,
+      JSON.stringify({ focus: note.id })
+    ])
+  }
+
+  Timer {
+    id: remindTimer
+    repeat: false
+    onTriggered: root.checkReminders()
+  }
+
   // ------------------------------------------------------------ persistence
 
   function save() {
@@ -151,6 +213,7 @@ Item {
     root.replaceAll(result.notes)
     root.tiled = result.view.tiled
     root.loaded = true
+    root.armReminders()
   }
 
   function replaceAll(list) {
@@ -222,5 +285,8 @@ Item {
     }
   }
 
-  Component.onCompleted: root.refreshMonitors()
+  Component.onCompleted: {
+    root.refreshMonitors()
+    root.armReminders()
+  }
 }

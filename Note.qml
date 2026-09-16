@@ -49,7 +49,14 @@ Item {
   readonly property bool editing: !!card.overlay && card.overlay.editingId === card.noteId && card.primary
   readonly property bool selected: !!card.overlay && card.overlay.selectedId === card.noteId && card.primary
   readonly property bool confirming: !!card.overlay && card.overlay.confirmingId === card.noteId && card.primary
-  readonly property bool focused: card.editing || card.dragging || card.selected || card.confirming
+  readonly property bool reminding: !!card.overlay && card.overlay.remindingId === card.noteId && card.primary
+  readonly property bool focused: card.editing || card.dragging || card.selected || card.confirming || card.reminding
+
+  // The time this note is to come back to you, and how that reads now.
+  readonly property double remindAt: card.note ? Model.remindAt(card.note) : 0
+  readonly property string remindText: card.remindAt && card.overlay
+    ? Model.remindLabel(card.remindAt, card.overlay.now) : ""
+  readonly property bool remindDue: card.remindText === "due"
 
   // Theme: the same [menu] surface tokens the Omarchy menu uses.
   readonly property color background: Color.menu.background
@@ -114,6 +121,18 @@ Item {
       editor.forceActiveFocus()
       editor.cursorPosition = editor.length
     })
+  }
+
+  function remindIn(text) {
+    var ms = Model.parseWhen(text, Date.now())
+    if (!ms) return
+    card.overlay.setRemind(card.noteId, ms)
+    card.host.focusBoard()
+  }
+
+  function clearRemind() {
+    card.overlay.setRemind(card.noteId, 0)
+    card.host.focusBoard()
   }
 
   function stopEdit() {
@@ -418,6 +437,12 @@ Item {
               event.accepted = true
               return
             }
+            if ((event.modifiers & Qt.AltModifier) && event.key === Qt.Key_R) {
+              card.stopEdit()
+              card.overlay.askRemind(card.noteId)
+              event.accepted = true
+              return
+            }
             if (!(event.modifiers & Qt.ControlModifier)) return
             var marker = ""
             if (event.key === Qt.Key_B) marker = "**"
@@ -479,6 +504,30 @@ Item {
           interval: 700
           onTriggered: scrollbar.showing = false
         }
+      }
+    }
+
+    // -------- when this note is due back, said quietly in the corner
+
+    Row {
+      visible: card.remindText !== "" && !card.confirming && !card.reminding
+      anchors.left: parent.left
+      anchors.bottom: parent.bottom
+      anchors.leftMargin: surface.contentLeftInset + Style.spacing.md
+      anchors.bottomMargin: surface.contentBottomInset + Style.spacing.xs
+      spacing: Style.spacing.xs
+
+      Text {
+        text: "\uf0f3"
+        color: card.remindDue ? Color.urgent : Util.alpha(card.accent, 0.8)
+        font.family: card.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+      Text {
+        text: card.remindText
+        color: card.remindDue ? Color.urgent : Util.alpha(card.accent, 0.8)
+        font.family: card.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
 
@@ -581,6 +630,163 @@ Item {
           color: Util.alpha(card.foreground, 0.55)
           font.family: card.fontFamily
           font.pixelSize: Style.font.caption
+        }
+      }
+    }
+
+    // -------- when to be reminded of it
+
+    Rectangle {
+      id: remindSheet
+      anchors.fill: parent
+      visible: card.reminding
+      color: Util.alpha(card.background, 0.94)
+
+      // The presets are the answer most of the time; the field is there for
+      // the times they are not. Both go through parseWhen, so there is one
+      // reading of what a time means.
+      readonly property var presets: ["10m", "30m", "1h", "3h", "tomorrow"]
+      readonly property double parsed: card.reminding ? Model.parseWhen(whenField.text, Date.now()) : 0
+
+      MouseArea { anchors.fill: parent }
+
+      onVisibleChanged: {
+        if (remindSheet.visible) {
+          whenField.text = ""
+          Qt.callLater(function() { whenField.forceActiveFocus() })
+        }
+      }
+
+      Column {
+        anchors.centerIn: parent
+        spacing: Style.spacing.md
+        width: parent.width - Style.spacing.xl * 2
+
+        Text {
+          width: parent.width
+          horizontalAlignment: Text.AlignHCenter
+          text: card.remindAt ? "Reminding you " + card.remindText : "Remind me"
+          color: card.foreground
+          font.family: card.fontFamily
+          font.pixelSize: card.textSize
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        Flow {
+          width: parent.width
+          spacing: Style.spacing.xs
+
+          Repeater {
+            model: remindSheet.presets
+
+            Rectangle {
+              required property string modelData
+              width: presetLabel.implicitWidth + Style.spacing.controlPaddingX * 2
+              height: presetLabel.implicitHeight + Style.spacing.controlPaddingY * 2
+              radius: Style.cornerRadius
+              color: presetMouse.containsMouse ? Color.accent : Util.alpha(Color.accent, 0.18)
+
+              Text {
+                id: presetLabel
+                anchors.centerIn: parent
+                text: parent.modelData
+                color: presetMouse.containsMouse ? card.background : Color.accent
+                font.family: card.fontFamily
+                font.pixelSize: Style.font.body
+              }
+              MouseArea {
+                id: presetMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: card.remindIn(parent.modelData)
+              }
+            }
+          }
+
+          Rectangle {
+            visible: card.remindAt > 0
+            width: clearLabel.implicitWidth + Style.spacing.controlPaddingX * 2
+            height: clearLabel.implicitHeight + Style.spacing.controlPaddingY * 2
+            radius: Style.cornerRadius
+            color: clearMouse.containsMouse ? Util.alpha(card.foreground, 0.18) : "transparent"
+            border.width: Math.max(1, Style.normalBorderWidth)
+            border.color: Util.alpha(card.foreground, 0.35)
+
+            Text {
+              id: clearLabel
+              anchors.centerIn: parent
+              text: "Clear"
+              color: card.foreground
+              font.family: card.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            MouseArea {
+              id: clearMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: card.clearRemind()
+            }
+          }
+        }
+
+        Rectangle {
+          width: parent.width
+          height: whenField.implicitHeight + Style.spacing.controlPaddingY * 2
+          radius: Style.cornerRadius
+          color: Util.alpha(card.foreground, 0.08)
+          border.width: Math.max(1, Style.normalBorderWidth)
+          border.color: Util.alpha(card.accent, 0.5)
+
+          TextInput {
+            id: whenField
+            anchors.fill: parent
+            anchors.leftMargin: Style.spacing.md
+            anchors.rightMargin: Style.spacing.md
+            verticalAlignment: TextInput.AlignVCenter
+            color: card.foreground
+            selectionColor: Util.alpha(card.accent, 0.35)
+            selectedTextColor: card.foreground
+            font.family: card.fontFamily
+            font.pixelSize: Style.font.body
+            selectByMouse: true
+
+            Text {
+              anchors.fill: parent
+              verticalAlignment: Text.AlignVCenter
+              visible: whenField.text === ""
+              text: "45m · 2h · 9:00 · tomorrow"
+              color: Util.alpha(card.foreground, 0.4)
+              font.family: card.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            Keys.onEscapePressed: {
+              card.overlay.cancelRemind()
+              card.host.focusBoard()
+            }
+            Keys.onReturnPressed: card.remindIn(whenField.text)
+            Keys.onEnterPressed: card.remindIn(whenField.text)
+          }
+        }
+
+        // What the field says it means, before you commit to it.
+        Text {
+          width: parent.width
+          horizontalAlignment: Text.AlignHCenter
+          text: {
+            if (whenField.text === "") return "Enter to set  ·  Esc to leave it"
+            if (!remindSheet.parsed) return "Not a time I know"
+            return "→ " + Model.remindLabel(remindSheet.parsed, Date.now())
+              + "  ·  " + Model.clockLabel(remindSheet.parsed)
+          }
+          color: whenField.text !== "" && !remindSheet.parsed
+            ? Color.urgent : Util.alpha(card.foreground, 0.55)
+          font.family: card.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
         }
       }
     }

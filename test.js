@@ -301,6 +301,110 @@ test("tileNotes leaves the stored notes untouched, so flowing back restores them
   assert.strictEqual(flowed.a.ly, 0.75 * DP5.height)
 })
 
+test("sanitizeNote keeps a readable reminder and drops a broken one", () => {
+  const r = M.parseFile(JSON.stringify({ version: 1, notes: [
+    { id: "a", remind: "2026-09-16T10:00:00.000Z" },
+    { id: "b", remind: "half past nine" },
+    { id: "c" }] }))
+  assert.strictEqual(r.notes[0].remind, "2026-09-16T10:00:00.000Z")
+  assert.strictEqual(r.notes[1].remind, "")
+  assert.strictEqual(r.notes[2].remind, "")
+  // and it survives a round trip
+  assert.strictEqual(M.parseFile(M.serialize(r.notes)).notes[0].remind, "2026-09-16T10:00:00.000Z")
+})
+
+// A fixed local noon, so the clock-time cases don't depend on the timezone
+// the tests happen to run in.
+const NOON = new Date(2026, 8, 16, 12, 0, 0, 0).getTime()
+const MIN = 60000, HOUR = 3600000, DAY = 86400000
+
+test("parseWhen reads durations, a bare number being minutes", () => {
+  assert.strictEqual(M.parseWhen("45", NOON), NOON + 45 * MIN)
+  assert.strictEqual(M.parseWhen("45m", NOON), NOON + 45 * MIN)
+  assert.strictEqual(M.parseWhen("90 mins", NOON), NOON + 90 * MIN)
+  assert.strictEqual(M.parseWhen("2h", NOON), NOON + 2 * HOUR)
+  assert.strictEqual(M.parseWhen("1.5h", NOON), NOON + 90 * MIN)
+  assert.strictEqual(M.parseWhen("1h30", NOON), NOON + 90 * MIN)
+  assert.strictEqual(M.parseWhen("1h30m", NOON), NOON + 90 * MIN)
+  assert.strictEqual(M.parseWhen("3d", NOON), NOON + 3 * DAY)
+  assert.strictEqual(M.parseWhen("in 20m", NOON), NOON + 20 * MIN)
+})
+
+test("parseWhen reads a clock time, rolling over to tomorrow once it has gone", () => {
+  const later = M.parseWhen("14:30", NOON)
+  assert.strictEqual(new Date(later).getHours(), 14)
+  assert.strictEqual(new Date(later).getMinutes(), 30)
+  assert.strictEqual(new Date(later).getDate(), new Date(NOON).getDate())
+  // 9:00 has been and gone by noon, so it means tomorrow
+  const gone = M.parseWhen("9:00", NOON)
+  assert.ok(gone > NOON)
+  assert.strictEqual(new Date(gone).getHours(), 9)
+  assert.strictEqual(new Date(gone).getDate(), new Date(NOON + DAY).getDate())
+  // a dot reads as a colon, and "at" is allowed
+  assert.strictEqual(M.parseWhen("14.30", NOON), later)
+  assert.strictEqual(M.parseWhen("at 14:30", NOON), later)
+})
+
+test("parseWhen reads tomorrow, at nine unless told otherwise", () => {
+  const t = M.parseWhen("tomorrow", NOON)
+  assert.strictEqual(new Date(t).getHours(), 9)
+  assert.strictEqual(new Date(t).getMinutes(), 0)
+  assert.strictEqual(new Date(t).getDate(), new Date(NOON + DAY).getDate())
+  const t830 = M.parseWhen("tomorrow 8:30", NOON)
+  assert.strictEqual(new Date(t830).getHours(), 8)
+  assert.strictEqual(new Date(t830).getMinutes(), 30)
+})
+
+test("parseWhen says nothing rather than guessing", () => {
+  for (const bad of ["", "   ", "soon", "0", "0m", "-5m", "25:00", "9:70", "tomorrow 25:00", "abc 5m"])
+    assert.strictEqual(M.parseWhen(bad, NOON), 0, "should not parse: " + JSON.stringify(bad))
+})
+
+test("remindLabel counts down close by and gives the time further off", () => {
+  assert.strictEqual(M.remindLabel(0, NOON), "")
+  assert.strictEqual(M.remindLabel(NOON - MIN, NOON), "due")
+  assert.strictEqual(M.remindLabel(NOON + 25 * MIN, NOON), "in 25m")
+  assert.strictEqual(M.remindLabel(NOON + 30 * 1000, NOON), "in 1m")
+  assert.strictEqual(M.remindLabel(NOON + 4 * HOUR, NOON), "at 16:00")
+  assert.strictEqual(M.remindLabel(M.parseWhen("tomorrow 8:30", NOON), NOON), "tomorrow 8:30")
+  assert.strictEqual(M.remindLabel(NOON + 3 * DAY, NOON), "in 3d")
+})
+
+test("dueNotes and nextRemind pick out what is ready and what is waiting", () => {
+  const notes = [
+    Object.assign(note("late", DP5, 0.1, 0.1), { remind: new Date(NOON - 2 * HOUR).toISOString() }),
+    Object.assign(note("later", DP5, 0.2, 0.2), { remind: new Date(NOON - HOUR).toISOString() }),
+    Object.assign(note("soon", DP5, 0.3, 0.3), { remind: new Date(NOON + 5 * MIN).toISOString() }),
+    Object.assign(note("far", DP5, 0.4, 0.4), { remind: new Date(NOON + DAY).toISOString() }),
+    note("none", DP5, 0.5, 0.5)
+  ]
+  // oldest first, so a backlog rings in the order it was set
+  assert.strictEqual(M.dueNotes(notes, NOON).map(n => n.id).join(","), "late,later")
+  assert.strictEqual(M.nextRemind(notes, NOON), NOON + 5 * MIN)
+  assert.strictEqual(M.dueNotes([], NOON).length, 0)
+  assert.strictEqual(M.nextRemind([note("none", DP5, 0.1, 0.1)], NOON), 0)
+  // a reminder that cannot be read is no reminder at all
+  assert.strictEqual(M.remindAt({ remind: "whenever" }), 0)
+})
+
+test("noteSummary gives a notification its headline and body, marks off", () => {
+  const s = M.noteSummary("# **Standup**\n\nwith *Dan*\n- Purchase files\n[x] done\n[ ] todo")
+  assert.strictEqual(s.title, "Standup")
+  assert.strictEqual(s.body, "with Dan\n• Purchase files\n✓ done")
+  for (const empty of ["", "\n\n  \n"]) {
+    assert.strictEqual(M.noteSummary(empty).title, "Note")
+    assert.strictEqual(M.noteSummary(empty).body, "")
+  }
+  // a headline that is exactly one of omarchy-notification-send's flags would
+  // be read as an option, so it is not used as one
+  assert.strictEqual(M.noteSummary("-u").title, "Note")
+  assert.strictEqual(M.noteSummary("--exec").title, "Note")
+  // but a line that merely starts with a dash is text, and kept
+  assert.strictEqual(M.noteSummary("-50% off").title, "-50% off")
+  // long lines are clipped rather than filling the toast
+  assert.ok(M.noteSummary("x".repeat(200)).title.length <= 60)
+})
+
 test("nearestTo picks the note closest to a point", () => {
   const p = { a: { gx: 0, gy: 0, w: 100, h: 100 }, b: { gx: 1000, gy: 0, w: 100, h: 100 } }
   assert.strictEqual(M.nearestTo(p, 40, 40), "a")

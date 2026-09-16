@@ -28,6 +28,13 @@ border and font, with Hyprland's corner rounding.
   disk, so nothing is lost, but the grid itself is remembered until you
   press `Alt+T` again -- hiding the board, or restarting the shell, leaves
   it be. Moving a note by hand also ends the tiled view.
+- **Reminders:** `Alt+R` sets a time on the note you're on -- a preset, or
+  type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. When it comes
+  up you get a notification, and clicking it opens the board with that note
+  selected. The note shows its reminder in the corner until then. Reminders
+  ring whether the board is up or not, and one that fell due while the shell
+  was down rings when it comes back. They are one-shot: ringing clears them,
+  and so does `Alt+R` then "Clear".
 - **Deleting:** `Del` (or a right-click) deletes the note you're on, after a
   yes or no. `Ctrl+Z` brings it back.
 - **Theme:** everything follows `omarchy theme set`.
@@ -91,6 +98,7 @@ Your notes stay in `~/Documents/notes.json`.
 | `↑` `↓` | Scroll the note you are on, a line at a time |
 | `PageUp` `PageDown` | Scroll it by a screenful |
 | `Enter` | Write in the note you are on |
+| `Alt + R` | Set or clear a reminder on the note you are on |
 | `Alt + T` | Line every note up in a grid on its own screen, and back again |
 | `Del` | Delete the note you are on, after a yes or no |
 | drag | Move a note, anywhere on it, across monitors |
@@ -106,10 +114,16 @@ note and moves to the next one.
 
 | File | What |
 |---|---|
-| `~/Documents/notes.json` | Your notes, and whether the board is tiled. Plain JSON, written atomically, safe to edit by hand; the board picks up the change. |
-| `Model.js` | File format, monitor identity, placement, tiling and markdown logic |
-| `Store.qml` | Service: loads and saves the file, and knows which monitor is which |
+| `~/Documents/notes.json` | Your notes, their reminders, and whether the board is tiled. Plain JSON, written atomically, safe to edit by hand; the board picks up the change. |
+| `Model.js` | File format, monitor identity, placement, tiling, reminder times and markdown logic |
+| `Store.qml` | Service: loads and saves the file, watches the clock for reminders, and knows which monitor is which |
 | `Overlay.qml` / `NoteWindow.qml` / `Note.qml` | The board: one window per screen, and the notes on it |
+
+A reminder is a time on the note itself, so it is written down with the
+note. `Store.qml` is kept loaded whether the board is showing or not, which
+is what lets a reminder arrive while you are working in something else; the
+notification carries its click action as argv rather than a shell line, so a
+note's own text can never become a command.
 
 Each note records its monitor and its position as a fraction of that screen,
 so notes keep their place when the resolution or scale changes. If the file
