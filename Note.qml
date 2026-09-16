@@ -174,11 +174,18 @@ Item {
     card.host.focusBoard()
   }
 
+  // Put the editor away but leave the note where it stands. What comes
+  // next -- the reminder sheet -- belongs on the note as you are looking at
+  // it, not on the small card it was lifted out of.
+  function leaveEditor() {
+    if (card.overlay.editingId === card.noteId) card.overlay.editingId = ""
+    card.host.focusBoard()
+  }
+
   // Esc: the note goes back to the size and the place it came from.
   function stopEdit() {
-    if (card.overlay.editingId === card.noteId) card.overlay.editingId = ""
+    card.leaveEditor()
     if (card.overlay.zoomedId === card.noteId) card.overlay.unzoom()
-    card.host.focusBoard()
   }
 
   onEditingChanged: if (card.editing) card.beginEditor()
@@ -499,7 +506,7 @@ Item {
               return
             }
             if ((event.modifiers & Qt.AltModifier) && event.key === Qt.Key_R) {
-              card.stopEdit()
+              card.leaveEditor()
               card.overlay.askRemind(card.noteId)
               event.accepted = true
               return
