@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -59,6 +60,12 @@ Item {
                     card.overlay.zoomFactor, card.overlay.zoomMargin)
     : 1
   readonly property bool focused: card.editing || card.dragging || card.selected || card.confirming || card.reminding
+  // The note you are on stands a little proud of the board, with a shadow
+  // under it, so which one you are on is plain across a screenful of cards
+  // rather than a matter of reading borders. One already lifted out to the
+  // middle is as clear as it gets, and is left alone.
+  readonly property bool lifted: card.focused && !card.zoomed
+  readonly property real liftScale: card.lifted ? 1.03 : 1
 
   // The time this note is to come back to you, and how that reads now.
   readonly property double remindAt: card.note ? Model.remindAt(card.note) : 0
@@ -117,7 +124,7 @@ Item {
   x: card.zoomed && card.host.info ? (card.host.info.width - card.width) / 2 : card.gx - card.sx
   y: card.zoomed && card.host.info ? (card.host.info.height - card.height) / 2 : card.gy - card.sy
   transformOrigin: Item.Center
-  scale: card.zoomScale
+  scale: card.zoomScale * card.liftScale
   width: card.placement ? card.placement.w : 0
   height: card.placement ? card.placement.h : 0
   // Stacking. Notes keep the order they were last clicked into, but the one
@@ -138,7 +145,7 @@ Item {
   Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
 
   function activate() {
-    card.overlay.activeScreen = card.host.screenName
+    card.overlay.claimScreen(card.host.screenName)
     // Reaching for another note puts back the one that was shown on its own.
     if (card.overlay.zoomedId !== card.noteId) card.overlay.unzoom()
     card.overlay.selectedId = card.noteId
@@ -189,6 +196,10 @@ Item {
   }
 
   onEditingChanged: if (card.editing) card.beginEditor()
+
+  // If the card goes while it has the pointer -- the board rebuilt under a
+  // drag -- the note is dropped where it stands rather than left in flight.
+  Component.onDestruction: if (card.dragging && card.isSource) card.overlay.endDrag()
 
   // ---------------------------------------------------------- scrolling
 
@@ -253,6 +264,23 @@ Item {
     }
   }
 
+  // Drawn behind the card: the same surface again, for its shadow alone --
+  // the real one covers it, so only what falls outside is seen.
+  MultiEffect {
+    anchors.fill: surface
+    source: surface
+    z: -1
+    visible: card.lifted && !!card.note
+    autoPaddingEnabled: true
+    shadowEnabled: true
+    shadowColor: Qt.rgba(0, 0, 0, 0.55)
+    shadowBlur: 1
+    blurMax: 48
+    shadowVerticalOffset: Style.space(10)
+    opacity: card.lifted ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
+  }
+
   BorderSurface {
     id: surface
     anchors.fill: parent
@@ -309,6 +337,7 @@ Item {
           }
 
           onPressed: function(mouse) {
+            card.overlay.beginPress()
             card.activate()
             if (mouse.button === Qt.RightButton) {
               card.overlay.askDelete(card.noteId)
@@ -337,16 +366,22 @@ Item {
           }
 
           onReleased: function(mouse) {
-            if (mouse.button !== Qt.LeftButton) return
-            grab.armed = false
-            var wasDrag = !!card.drag && card.drag.moved
-            card.overlay.endDrag()
-            if (!wasDrag) card.startEdit()
+            if (mouse.button === Qt.LeftButton) {
+              grab.armed = false
+              var wasDrag = !!card.drag && card.drag.moved
+              card.overlay.endDrag()
+              if (!wasDrag) card.startEdit()
+            }
+            // Last, and whichever button it was: the note is picked up,
+            // dragged and dropped -- or asked about -- before the keyboard
+            // moves screen and the surfaces underneath it change.
+            card.overlay.endPress()
           }
 
           onCanceled: {
             grab.armed = false
             card.overlay.endDrag()
+            card.overlay.endPress()
           }
         }
 
@@ -480,6 +515,10 @@ Item {
           font.pixelSize: card.textSize
 
           onCursorRectangleChanged: editFlick.ensureVisible(cursorRectangle)
+          // Selecting text is the question "what can I do to this?", and the
+          // toolbar answers it with the marks.
+          onSelectedTextChanged: if (card.editing) card.overlay.textSelected = editor.selectedText !== ""
+
           onTextChanged: {
             if (card.editing && card.note && text !== card.note.text)
               card.store.update(card.noteId, { text: text })
@@ -505,9 +544,27 @@ Item {
               event.accepted = true
               return
             }
+            // Alt + Enter puts the note back, the mirror of the Enter that
+            // opened it. Enter alone is a new line in the text.
+            if ((event.modifiers & Qt.AltModifier)
+                && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+              card.stopEdit()
+              event.accepted = true
+              return
+            }
             if ((event.modifiers & Qt.AltModifier) && event.key === Qt.Key_R) {
               card.leaveEditor()
               card.overlay.askRemind(card.noteId)
+              event.accepted = true
+              return
+            }
+            // Del alone belongs to the text you are writing, so deleting the
+            // note itself from in here takes Alt with it. The note stays
+            // lifted out while it asks, so the yes or no is put to you at
+            // the size you were reading it at.
+            if ((event.modifiers & Qt.AltModifier) && event.key === Qt.Key_Delete) {
+              card.leaveEditor()
+              card.overlay.askDelete(card.noteId)
               event.accepted = true
               return
             }

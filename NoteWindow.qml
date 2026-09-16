@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Window
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
@@ -24,14 +25,75 @@ PanelWindow {
   exclusionMode: ExclusionMode.Ignore
   WlrLayershell.namespace: "omarchy-notes"
   WlrLayershell.layer: WlrLayer.Overlay
-  WlrLayershell.keyboardFocus: win.isActive ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+  // Hyprland gives the keyboard to a layer surface only while that surface
+  // asks for it exclusively -- and an exclusive surface is also the only one
+  // it will send a button to, which is what left the boards on every other
+  // screen watching the pointer cross them and never hearing the click. So
+  // the board takes the keyboard in a blink and lets go of it again:
+  // exclusive long enough to be handed it, on demand from then on. Hyprland
+  // does not take it back, and with nothing exclusive standing, a click
+  // lands on whichever screen the pointer is over.
+  WlrLayershell.keyboardFocus: win.isActive
+    ? (win.claiming ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.OnDemand)
+    : WlrKeyboardFocus.None
+  property bool claiming: false
+
+  Timer {
+    id: claimBlink
+    interval: 120
+    onTriggered: win.claiming = false
+  }
+
+  // Asking for the keyboard, not holding on to it.
+  function claimKeyboard() {
+    win.claiming = true
+    claimBlink.restart()
+  }
 
   readonly property string fontFamily: Style.font.menuFamily
 
+  // What you can do from here, said in the toolbar rather than left to be
+  // remembered. The list follows the board: a note you are writing in offers
+  // different keys than an empty screen, and a question offers only its own
+  // two answers. Pairs of [key, what it does].
+  readonly property var hints: {
+    var o = win.overlay
+    if (!o) return []
+    if (o.confirmingId !== "") return [["Enter", "delete"], ["Esc", "keep"]]
+    if (o.remindingId !== "") return [["Enter", "set"], ["Esc", "leave it"]]
+    // Text held: what you meant to ask was how to style it.
+    if (o.editingId !== "" && o.textSelected)
+      return [["Ctrl + B", "bold"], ["Ctrl + I", "italic"], ["Ctrl + U", "underline"],
+              ["Ctrl + D", "strike"], ["Ctrl + E", "code"], ["Ctrl + 1", "heading"],
+              ["Ctrl + L", "bullet"], ["Ctrl + K", "task"]]
+    if (o.editingId !== "")
+      return [["Alt + Enter", "put it back"], ["Ctrl + B", "bold"], ["Alt + R", "remind"],
+              ["Alt + Del", "delete"]]
+    if (o.zoomedId !== "")
+      return [["Alt + Enter", "put it back"], ["Enter", "write"], ["Alt + R", "remind"],
+              ["Alt + Del", "delete"]]
+    var undo = win.store && win.store.lastDeleted ? [["Ctrl + Z", "undo the delete"]] : []
+    if (o.selectedId !== "" && o.placements[o.selectedId])
+      return undo.concat([["Enter", "open it"], ["Alt + ← →", "next note"], ["Alt + R", "remind"],
+                          ["Del", "delete"], ["Alt + T", o.tiled ? "let them flow" : "tile"]])
+    return undo.concat([["N", "new note"], ["Alt + ← →", "pick one"],
+                        ["Alt + T", o.tiled ? "let them flow" : "tile"], ["Esc", "close"]])
+  }
+
   function focusBoard() { keyCatcher.forceActiveFocus() }
 
-  onIsActiveChanged: if (win.isActive) Qt.callLater(win.focusBoard)
-  Component.onCompleted: if (win.isActive) Qt.callLater(win.focusBoard)
+  // Coming to the keyboard puts it on the board itself -- unless a note is
+  // being written in or asked when to come back, which want the keys more
+  // than the board does. A click on a note of another screen's board arrives
+  // as both at once: the screen comes forward and the note opens for writing.
+  function focusBoardUnlessWriting() {
+    if (!win.overlay) return
+    if (win.overlay.editingId !== "" || win.overlay.remindingId !== "") return
+    win.focusBoard()
+  }
+
+  onIsActiveChanged: if (win.isActive) { win.claimKeyboard(); Qt.callLater(win.focusBoardUnlessWriting) }
+  Component.onCompleted: if (win.isActive) { win.claimKeyboard(); Qt.callLater(win.focusBoardUnlessWriting) }
 
   Rectangle {
     anchors.fill: parent
@@ -54,6 +116,20 @@ PanelWindow {
       easing.type: Easing.OutQuint
     }
 
+    // A note left stuck to the pointer: the button came up over a surface
+    // this one never heard about, or the card was rebuilt under the drag, so
+    // nothing ever ended it -- and the note stays glued to the cursor, shown
+    // as a picture on every other screen and picked up by none of them.
+    // While a drag is live the note itself holds the pointer and this window
+    // hears no hover at all, so a hover here means the drag is over.
+    HoverHandler {
+      enabled: !!win.overlay.drag && win.overlay.drag.source === win.screenName
+      onPointChanged: {
+        win.overlay.endDrag()
+        win.overlay.endPress()
+      }
+    }
+
     // Tiled, the board itself scrolls once the notes run past the rows the
     // screen shows. The wheel over a note still scrolls that note; this
     // catches the glass between and around them.
@@ -70,10 +146,13 @@ PanelWindow {
     MouseArea {
       anchors.fill: parent
       onPressed: {
-        win.overlay.activeScreen = win.screenName
+        win.overlay.beginPress()
+        win.overlay.claimScreen(win.screenName)
         win.overlay.editingId = ""
         win.focusBoard()
       }
+      onReleased: win.overlay.endPress()
+      onCanceled: win.overlay.endPress()
       onDoubleClicked: function(mouse) {
         win.overlay.createAt(win.screenName, mouse.x - Model.DEFAULT_W / 2, mouse.y - 14)
       }
@@ -153,17 +232,47 @@ PanelWindow {
           font.pixelSize: Style.font.body
         }
 
-        Text {
+        Row {
           anchors.verticalCenter: parent.verticalCenter
-          text: {
-            if (win.store && win.store.lastDeleted) return "Deleted  ·  Ctrl+Z to undo"
-            if (win.overlay.tiled) return "Alt+T to let them flow back"
-            if (win.overlay.zoomedId !== "") return "Esc to put it back"
-            return "N add  ·  Alt+R remind  ·  Alt+T tile  ·  Del delete  ·  Esc close"
+          spacing: Style.spacing.lg
+
+          Repeater {
+            model: win.hints
+
+            Row {
+              required property var modelData
+              spacing: Style.spacing.xs
+              anchors.verticalCenter: parent.verticalCenter
+
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: keyLabel.implicitWidth + Style.spacing.sm * 2
+                height: keyLabel.implicitHeight + Style.spacing.xs * 2
+                radius: Math.max(2, Style.cornerRadius / 2)
+                color: Util.alpha(Color.foreground, 0.1)
+                border.width: 1
+                border.color: Util.alpha(Color.foreground, 0.22)
+
+                Text {
+                  id: keyLabel
+                  anchors.centerIn: parent
+                  text: modelData[0]
+                  color: Color.accent
+                  font.family: win.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: modelData[1]
+                color: Util.alpha(Color.foreground, 0.6)
+                font.family: win.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
           }
-          color: Util.alpha(Color.foreground, 0.6)
-          font.family: win.fontFamily
-          font.pixelSize: Style.font.caption
         }
       }
     }
@@ -172,6 +281,12 @@ PanelWindow {
   Item {
     id: keyCatcher
     focus: true
+    // Whether the compositor has handed this surface the keyboard. The board
+    // follows it: see reportKeyboard.
+    readonly property bool windowActive: Window.active
+    onWindowActiveChanged: win.overlay.reportKeyboard(win.screenName, keyCatcher.windowActive)
+    Component.onCompleted: win.overlay.reportKeyboard(win.screenName, keyCatcher.windowActive)
+    Component.onDestruction: win.overlay.reportKeyboard(win.screenName, false)
     Keys.onPressed: function(event) {
       var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
       var alt = (event.modifiers & Qt.AltModifier) !== 0
@@ -213,6 +328,10 @@ PanelWindow {
         var toEnd = event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown
         var back = event.key === Qt.Key_Up || event.key === Qt.Key_PageUp
         if (win.overlay.scrollSelected(back ? -1 : 1, toEnd)) event.accepted = true
+      } else if (alt && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+        // The other half of Enter: it puts a note shown on its own back.
+        win.overlay.unzoom()
+        event.accepted = true
       } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
         win.overlay.editSelected()
         event.accepted = true

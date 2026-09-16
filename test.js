@@ -415,5 +415,31 @@ test("nextInDirection copes with one note and unknown ids", () => {
   assert.strictEqual(M.nextInDirection(p, "gone", "right"), null)
 })
 
+test("topNote picks the note last worked on, by screen then by board", () => {
+  const notes = [
+    { id: "a", z: 1, monitor: {} }, { id: "b", z: 9, monitor: {} }, { id: "c", z: 4, monitor: {} }
+  ]
+  const p = {
+    a: { gx: 0, gy: 0, w: 10, h: 10, screenName: "DP-5" },
+    b: { gx: 0, gy: 0, w: 10, h: 10, screenName: "DP-7" },
+    c: { gx: 0, gy: 0, w: 10, h: 10, screenName: "DP-5" }
+  }
+  assert.strictEqual(M.topNote(notes, p, "DP-5"), "c")   // top of that screen's pile
+  assert.strictEqual(M.topNote(notes, p, ""), "b")       // top of the board
+  assert.strictEqual(M.topNote(notes, p, "eDP-1"), null) // a bare screen
+  assert.strictEqual(M.topNote([], p, ""), null)
+})
+
+test("nearestOther hands the board to the note nearest the one deleted", () => {
+  const p = {
+    gone: { gx: 1000, gy: 0, w: 100, h: 100 },
+    near: { gx: 1200, gy: 0, w: 100, h: 100 },
+    far: { gx: 4000, gy: 900, w: 100, h: 100 }
+  }
+  assert.strictEqual(M.nearestOther(p, "gone"), "near")
+  assert.strictEqual(M.nearestOther({ only: p.gone }, "only"), null)
+  assert.strictEqual(M.nearestOther(p, "never-was"), null)
+})
+
 if (failed) { console.log(failed + " failed"); process.exit(1) }
 console.log("all passed")

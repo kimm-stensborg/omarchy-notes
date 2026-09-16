@@ -11,14 +11,24 @@ border and font, with Hyprland's corner rounding.
 
 ## What it does
 
-- **SUPER + N** shows the board on all monitors. Esc hides it.
+- **SUPER + N** shows the board on all monitors. Esc hides it, and so does
+  the keyboard going anywhere else -- a window behind it, the menu -- since a
+  board that cannot hear you is no use standing there. The note you
+  were last on is in hand as it opens -- the top of the pile on the screen you
+  summoned it from -- so the arrows have somewhere to start and you can see
+  where you are. There is always one in hand: delete the note you are on and
+  the nearest takes over.
 - **New notes:** "+ New note", `N`, or a double-click on empty space. A new
   note never lands exactly on one already there -- it steps down and to the
-  right until it has a place of its own, so it can't hide inside another.
+  right until it has a place of its own, so it can't hide inside another. A
+  board with nothing on it -- the first time you open Notes, or the moment
+  you delete the last note -- puts one out for you, open in the middle and
+  ready to type in, rather than showing you an empty screen.
 - **Writing:** click a note to write in it, or press `Enter` on it. It
   lifts out to the middle of its screen and is shown at twice the size,
   so what you are writing is the thing in front of you rather than one card
-  among many; `Esc` puts it back exactly where it was. A note too big to be
+  among many; `Esc` -- or `Alt+Enter`, the other half of the `Enter` that
+  opened it -- puts it back exactly where it was. A note too big to be
   blown up that far is enlarged as far as it fits. The note you're on wears
   the active window border and comes to the front of the pile, so a note
   under another is never read through it.
@@ -36,7 +46,9 @@ border and font, with Hyprland's corner rounding.
   again -- hiding the board, or restarting the shell, leaves it be. Moving a
   note by hand also ends the tiled view.
 - **Reminders:** `Alt+R` sets a time on the note you're on -- a preset, or
-  type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. When it comes
+  type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. The note comes
+  out to the middle of its screen to be asked, as it does for writing, and
+  goes back once you have answered. When it comes
   up you get a notification, and clicking it opens the board with that note
   shown the same way -- out in the middle, big enough to read across the
   room -- so the reminder lands on the note itself and not on a board you
@@ -45,7 +57,12 @@ border and font, with Hyprland's corner rounding.
   was down rings when it comes back. They are one-shot: ringing clears them,
   and so does `Alt+R` then "Clear".
 - **Deleting:** `Del` (or a right-click) deletes the note you're on, after a
-  yes or no. `Ctrl+Z` brings it back.
+  yes or no; from inside a note -- writing in it, or shown on its own -- it is
+  `Alt+Del`, since `Del` there belongs to the text. The note comes out to the
+  middle of its screen to be asked and goes back if you keep it, so the
+  question is put on the note itself at a size you can read rather than on a
+  card an inch across. The note nearest the one that went takes over, so the
+  board is never left pointing at nothing, and `Ctrl+Z` brings it back.
 - **Theme:** everything follows `omarchy theme set`.
 - **Unplugged monitors:** notes whose monitor is gone borrow the screen you
   are looking at and show `↩ <monitor>`. They go back home as soon as it is
@@ -69,7 +86,9 @@ puts the plain text back the moment you click into it.
 | `- item` | `Ctrl + L` | bullet in your accent colour |
 | `[ ] task` | `Ctrl + K` | checkbox you can click to tick |
 
-Every key toggles, so pressing it again takes the mark off. With nothing
+Select some text and the toolbar turns to these, since holding a selection is
+asking what can be done to it. Every key toggles, so pressing it again takes
+the mark off. With nothing
 selected, `Ctrl + B` and friends take the word the cursor is in. Ticked
 lines are dimmed and struck through, and `- [ ] task` works too.
 
@@ -107,16 +126,24 @@ Your notes stay in `~/Documents/notes.json`.
 | `↑` `↓` | Scroll the note you are on, a line at a time |
 | `PageUp` `PageDown` | Jump to the top or the foot of the note |
 | `Enter` | Write in the note you are on, shown big in the middle |
+| `Alt + Enter` | Put a note shown on its own back where it lives |
 | `Alt + R` | Set or clear a reminder on the note you are on |
 | `Alt + T` | Line every note up in a grid on its own screen, and back again |
 | `Del` | Delete the note you are on, after a yes or no |
+| `Alt + Del` | The same from inside a note, where `Del` is the text's |
 | drag | Move a note, anywhere on it, across monitors |
 | right-click | Delete that note, after a yes or no |
 | `Esc` | Put a note that is shown on its own back where it lives, then hide the board |
 | `Ctrl + Z` | Restore the last deleted note |
 
-The note you are on wears the active window border, so you can see where the
-arrows have taken you. `Alt + arrow` works while writing too: it leaves the
+The toolbar at the top of the screen you are working on says which of these
+are live where you stand, so the keys are in front of you rather than in this
+table: a note you are writing in offers different ones than an empty board,
+and a question offers only its own two answers.
+
+The note you are on wears the active window border and stands a little proud
+of the board, with a shadow under it, so you can see where the arrows have
+taken you across a screenful of cards. `Alt + arrow` works while writing too: it leaves the
 note and moves to the next one.
 
 ## Files

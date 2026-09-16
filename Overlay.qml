@@ -33,15 +33,29 @@ Item {
   // Where notes borrow a place while their own monitor is unplugged: the
   // monitor you were looking at when the board opened.
   property string fallbackScreen: ""
+  // A press only says which screen it wants the keyboard on. Handing it over
+  // reconfigures both layer surfaces, and Hyprland lets go of the pointer
+  // when a surface is reconfigured under a held button -- the drag would end
+  // on the pixel it started. So the swap waits for the button to come up.
+  property bool pressing: false
+  property string claimedScreen: ""
   // { id, source, gx, gy, w, h, dx, dy, startX, startY, moved } while dragged.
   property var drag: null
   property string editingId: ""
+  // Whether the note being written in has text selected. Selecting something
+  // is asking what can be done to it, so the toolbar answers with the marks.
+  property bool textSelected: false
+  onEditingIdChanged: root.textSelected = false
   // What the arrows move, Enter opens and Del deletes.
   property string selectedId: ""
   // The note waiting on a yes/no before it is deleted.
   property string confirmingId: ""
   // The note whose reminder is being set.
   property string remindingId: ""
+  // Whether the note shown on its own was lifted out only to be asked a
+  // question -- a reminder or a deletion -- and so goes back when it is
+  // answered.
+  property bool liftedToAsk: false
   // The note shown on its own: lifted out to the middle of its screen and
   // blown up, so it is the thing you are looking at rather than one card
   // among many. Writing in a note does it, and so does a reminder you
@@ -121,6 +135,64 @@ Item {
     return n
   }
 
+  // ------------------------------------------------------------- keyboard
+
+  // Which screen is to hold the keyboard. During a press it is only noted
+  // down: see pressing, above.
+  function claimScreen(name) {
+    if (root.pressing) root.claimedScreen = name
+    else root.activeScreen = name
+  }
+
+  function beginPress() {
+    // A drag still standing from a press this board never heard the end of
+    // is over, whatever it was told: the new press is the proof.
+    if (root.drag) root.endDrag()
+    root.pressing = true
+    root.claimedScreen = ""
+  }
+
+  function endPress() {
+    root.pressing = false
+    if (root.claimedScreen === "") return
+    root.activeScreen = root.claimedScreen
+    root.claimedScreen = ""
+  }
+
+  // --------------------------------------------------------- the keyboard
+  //                                                              going away
+  //
+  // The board is summoned, not left standing. If the keyboard goes somewhere
+  // this board is not -- a window behind it, the menu, the desktop -- the
+  // board goes with it, rather than staying up unable to hear a word you
+  // type. Handing the keyboard from one screen's board to another passes
+  // through a moment with nobody holding it, and so does summoning the board
+  // in the first place, which is what the wait and hadKeyboard are for.
+  property var keyboardOn: ({})
+  property bool hadKeyboard: false
+
+  function reportKeyboard(name, has) {
+    var m = ({})
+    for (var k in root.keyboardOn) if (k !== name) m[k] = true
+    if (has) m[name] = true
+    root.keyboardOn = m
+    if (Object.keys(m).length > 0) {
+      root.hadKeyboard = true
+      keyboardGone.stop()
+    } else if (root.opened && root.hadKeyboard) {
+      keyboardGone.restart()
+    }
+  }
+
+  Timer {
+    id: keyboardGone
+    interval: 500
+    onTriggered: {
+      if (!root.opened || Object.keys(root.keyboardOn).length > 0) return
+      root.dismiss()
+    }
+  }
+
   // ------------------------------------------------------------- lifecycle
 
   // A payload of { focus: <id> } opens the board on that note -- how a
@@ -130,15 +202,21 @@ Item {
     root.activeScreen = focused
     root.fallbackScreen = focused
     root.drag = null
+    root.pressing = false
+    root.claimedScreen = ""
     root.editingId = ""
+    root.textSelected = false
     root.selectedId = ""
     root.confirmingId = ""
     root.remindingId = ""
     root.zoomedId = ""
+    root.liftedToAsk = false
+    root.hadKeyboard = false
     root.tileScroll = ({})
     root.now = Date.now()
     if (root.store) root.store.refreshMonitors()
     root.opened = true
+    Qt.callLater(root.settleBoard)
 
     var wanted = ""
     try { wanted = String((JSON.parse(payloadJson || "{}") || {}).focus || "") } catch (e) { wanted = "" }
@@ -157,12 +235,16 @@ Item {
 
   function close() {
     root.opened = false
+    root.hadKeyboard = false
     root.drag = null
+    root.pressing = false
+    root.claimedScreen = ""
     root.editingId = ""
     root.selectedId = ""
     root.confirmingId = ""
     root.remindingId = ""
     root.zoomedId = ""
+    root.liftedToAsk = false
   }
 
   function dismiss() {
@@ -196,8 +278,42 @@ Item {
     if (!s || !root.store) return
     var free = Model.freeSpot(lx, ly, Model.DEFAULT_W, Model.DEFAULT_H, s, root.spotsOn(name))
     var f = Model.toFractions(free.lx, free.ly, Model.DEFAULT_W, Model.DEFAULT_H, s)
-    root.activeScreen = name
+    root.claimScreen(name)
     root.selectedId = root.store.create(name, f.x, f.y)
+  }
+
+  // Nothing on the board is a note waiting to be written, not a bare screen
+  // with a toolbar on it: one is put out in the middle, ready to type in.
+  // Opening on an empty file does it, and so does deleting the last note.
+  function fillEmptyBoard() {
+    if (!root.opened || !root.store || !root.store.loaded) return
+    if (root.store.count > 0 || root.screens.length === 0) return
+    root.createOn(root.effectiveActive)
+  }
+
+  // There is always a note in hand. The board opens on the one you were last
+  // on -- the top of the pile on the screen you summoned it from, or the top
+  // of the board if that screen is bare -- so you can see where you are and
+  // the arrows have somewhere to start from.
+  function ensureSelection() {
+    if (!root.opened || !root.store || !root.store.loaded) return
+    if (root.selectedId !== "" && root.placements[root.selectedId]) return
+    var id = Model.topNote(root.store.notes, root.placements, root.effectiveActive)
+    if (!id) id = Model.topNote(root.store.notes, root.placements, "")
+    if (id) root.select(id)
+  }
+
+  function settleBoard() {
+    root.fillEmptyBoard()
+    root.ensureSelection()
+  }
+
+  // The file is read after the board is summoned, so a board is only known to
+  // be empty -- or to have lost the note that was in hand -- a moment later.
+  Connections {
+    target: root.store
+    function onCountChanged() { Qt.callLater(root.settleBoard) }
+    function onLoadedChanged() { Qt.callLater(root.settleBoard) }
   }
 
   function createOn(name) {
@@ -224,7 +340,7 @@ Item {
     if (id !== root.zoomedId) root.zoomedId = ""
     root.selectedId = id
     var p = root.placements[id]
-    if (p) root.activeScreen = p.screenName
+    if (p) root.claimScreen(p.screenName)
     root.revealSelected()
   }
 
@@ -268,6 +384,7 @@ Item {
     var target = id || root.selectedId
     if (!target || !root.placements[target]) return
     root.select(target)
+    root.lift(target)
     root.editingId = ""
     root.confirmingId = target
   }
@@ -276,11 +393,21 @@ Item {
     var id = root.confirmingId
     root.confirmingId = ""
     if (!id || !root.store) return
-    if (root.selectedId === id) root.selectedId = ""
+    // Picked before the note goes, while it still has a place on the board.
+    var next = Model.nearestOther(root.placements, id)
+    root.selectedId = ""
+    // A note shown on its own is put back as it is deleted: what comes next
+    // is the board, not another note blown up in its place.
+    root.liftedToAsk = false
+    if (root.zoomedId === id) root.zoomedId = ""
     root.store.remove(id)
+    root.select(next)
   }
 
-  function cancelDelete() { root.confirmingId = "" }
+  function cancelDelete() {
+    root.confirmingId = ""
+    root.settle()
+  }
 
   // ------------------------------------------------------------- reminders
 
@@ -290,6 +417,7 @@ Item {
     var target = id || root.selectedId
     if (!target || !root.placements[target]) return
     root.select(target)
+    root.lift(target)
     root.editingId = ""
     root.confirmingId = ""
     root.now = Date.now()
@@ -300,9 +428,13 @@ Item {
     if (!root.store) return
     root.store.setRemind(id, whenMs)
     root.remindingId = ""
+    root.settle()
   }
 
-  function cancelRemind() { root.remindingId = "" }
+  function cancelRemind() {
+    root.remindingId = ""
+    root.settle()
+  }
 
   // ---------------------------------------------------------------- scroll
 
@@ -347,7 +479,28 @@ Item {
 
   // ------------------------------------------------------------------ zoom
 
-  function unzoom() { root.zoomedId = "" }
+  function unzoom() {
+    root.liftedToAsk = false
+    root.zoomedId = ""
+  }
+
+  // Asking about a note lifts it out first, the way writing in one does: a
+  // reminder and a deletion are both about that note, so it is the thing in
+  // front of you while you answer for it, and the sheet is put at the size
+  // you were reading it at rather than on a card an inch across.
+  function lift(id) {
+    if (root.zoomedId === id) return
+    root.liftedToAsk = true
+    root.zoomedId = id
+  }
+
+  // Answered: a note lifted out only to be asked about goes back where it
+  // lives. One you were already writing in stays out, where you left it.
+  function settle() {
+    if (!root.liftedToAsk) return
+    root.liftedToAsk = false
+    root.zoomedId = ""
+  }
 
   // -------------------------------------------------------------- dragging
 

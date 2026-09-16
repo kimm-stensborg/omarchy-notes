@@ -627,6 +627,35 @@ function nearestTo(placements, x, y) {
   return best
 }
 
+// The note last worked on: the top of the pile, since reaching for a note is
+// what raises it. Given a screen, the top of that screen's pile, so the board
+// opens on something on the screen you summoned it from rather than throwing
+// you to another one. Null when there is nothing there.
+function topNote(notes, placements, screenName) {
+  var bestId = null, bestZ = -Infinity
+  for (var i = 0; i < notes.length; i++) {
+    var n = notes[i]
+    var p = placements[n.id]
+    if (!p) continue
+    if (screenName && p.screenName !== screenName) continue
+    // Later wins a tie, so the newest of equals is the one in hand.
+    if (n.z >= bestZ) { bestZ = n.z; bestId = n.id }
+  }
+  return bestId
+}
+
+// Who the board goes to when a note is deleted: the nearest of the rest to
+// where the deleted one stood, so you are left looking at the same corner of
+// the same screen rather than at nothing. Null when it was the last one.
+function nearestOther(placements, id) {
+  var gone = placements[id]
+  if (!gone) return null
+  var rest = {}
+  for (var k in placements) if (k !== id) rest[k] = placements[k]
+  var c = center(gone)
+  return nearestTo(rest, c.x, c.y)
+}
+
 // The next note one arrow away, across every screen: the closest one that
 // lies that way, counting sideways drift double so a note straight ahead
 // wins over one further off to the side. With nothing that way it wraps
