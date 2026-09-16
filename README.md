@@ -27,11 +27,14 @@ border and font, with Hyprland's corner rounding.
   Hyprland moves windows, where the compositor lets it through.
 - **Tiling:** `Alt+T` lines every note up in a grid on its own screen,
   filled from the top left, and `Alt+T` again lets them flow back to where
-  they were. Notes keep their own size; the grid steps by the largest note
-  on that screen so the columns and rows line up. Tiling moves no note on
-  disk, so nothing is lost, but the grid itself is remembered until you
-  press `Alt+T` again -- hiding the board, or restarting the shell, leaves
-  it be. Moving a note by hand also ends the tiled view.
+  they were. The cells are the screen's rather than the notes': three rows
+  stand in its height and the columns share out its width, so the grid
+  fits whatever screen it is on and meets both edges. Past three rows the
+  board scrolls -- the wheel over the glass between the notes, and arrowing
+  onto a note below the fold brings it up. Tiling moves no note on disk, so
+  nothing is lost, but the grid itself is remembered until you press `Alt+T`
+  again -- hiding the board, or restarting the shell, leaves it be. Moving a
+  note by hand also ends the tiled view.
 - **Reminders:** `Alt+R` sets a time on the note you're on -- a preset, or
   type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. When it comes
   up you get a notification, and clicking it opens the board with that note

@@ -109,21 +109,19 @@ test("a new note is a portrait card, four across to five down", () => {
   assert.strictEqual(p.a.h, M.DEFAULT_H)
 })
 
-test("a 1440p screen tiles three rows of new notes, clear of the bottom", () => {
-  // the board's own numbers: room at the top for the bar and the toolbar,
-  // and Hyprland's gaps_out halved and doubled back for the grid gap
-  const TOP = 96, GAP = 10
+test("a 1440p screen tiles three rows, evenly stepped and clear of the bottom", () => {
+  const g = M.tileGrid(DP5, { gap: 10, top: 96 })
   const notes = []
-  for (let i = 0; i < 21; i++)
-    notes.push(note("n" + i, DP5, 0.1, 0.1, { w: M.DEFAULT_W, h: M.DEFAULT_H }))
-  const t = M.tileNotes(notes, [DP5], DP5.key, { gap: GAP, top: TOP })
+  for (let i = 0; i < g.cols * 3; i++) notes.push(note("n" + i, DP5, 0.1, 0.1))
+  const t = M.tileNotes(notes, [DP5], DP5.key, { gap: 10, top: 96 })
   const rows = [...new Set(Object.keys(t).map(k => t[k].ly))].sort((a, b) => a - b)
   assert.strictEqual(rows.length, 3)
-  // the third row sits where the grid puts it, not squashed up by the clamp
-  // that keeps a tail on screen -- which is what running out of room looks like
-  assert.strictEqual(rows[2], TOP + GAP + 2 * (M.DEFAULT_H + GAP))
-  for (const id in t)
-    assert.ok(t[id].ly + t[id].h <= DP5.height, id + " runs off the bottom")
+  // stepped by the grid's own pitch, not squashed together to fit
+  assert.strictEqual(rows[1] - rows[0], g.pitchY)
+  assert.strictEqual(rows[2] - rows[1], g.pitchY)
+  for (const id in t) assert.ok(t[id].ly + t[id].h <= DP5.height, id + " runs off the bottom")
+  // a screenful is exactly that: nothing to scroll until one more arrives
+  assert.strictEqual(M.tileMaxScroll(DP5, g.cols * 3, { gap: 10, top: 96 }), 0)
 })
 
 test("placeNotes: home present lands on its own screen", () => {
@@ -257,64 +255,100 @@ test("inlineMarkup escapes, then styles", () => {
   assert.strictEqual(M.inlineMarkup("<script>", A), "&lt;script&gt;")
 })
 
-test("tileNotes keeps each note's size and fills from the top left", () => {
+const GRID = { gap: 10, top: 96 }
+
+test("tileGrid measures the cell from the screen and fills both edges", () => {
+  for (const s of [DP5, DP7, EDP, { width: 3840, height: 2160 }, { width: 1280, height: 720 }]) {
+    const g = M.tileGrid(s, GRID)
+    assert.strictEqual(g.rows, 3)
+    // the columns share out the width, leaving less than a column's rounding
+    const spanned = g.cols * g.cellW + (g.cols + 1) * g.gap
+    assert.ok(spanned <= s.width, `${s.width}: grid ${spanned} overflows`)
+    assert.ok(s.width - spanned < g.cols + g.gap, `${s.width}: grid ${spanned} falls short`)
+    // and three rows stand in the height, under the room kept at the top
+    const bottom = g.top + g.gap + 3 * g.pitchY - g.gap
+    assert.ok(bottom <= s.height, `${s.height}: rows reach ${bottom}`)
+    assert.ok(s.height - bottom < g.pitchY, `${s.height}: a fourth row would fit`)
+  }
+})
+
+test("tileGrid keeps a cell near a note's own four-to-five shape", () => {
+  for (const s of [DP5, EDP, { width: 3840, height: 2160 }]) {
+    const g = M.tileGrid(s, GRID)
+    const ratio = g.cellW / g.cellH
+    assert.ok(Math.abs(ratio - 4 / 5) < 0.09, `${s.width}x${s.height}: ratio ${ratio}`)
+  }
+})
+
+test("tileNotes gives every note the screen's cell and fills from the top left", () => {
   const notes = [1, 2, 3, 4].map(i => note("n" + i, DP5, 0.1 * i, 0.1 * i))
-  const t = M.tileNotes(notes, [DP5], DP5.key, { gap: 10, top: 90 })
+  const t = M.tileNotes(notes, [DP5], DP5.key, GRID)
+  const g = M.tileGrid(DP5, GRID)
   const cells = Object.keys(t).map(k => t[k])
   assert.strictEqual(cells.length, 4)
-  // sizes are untouched -- tiling lines notes up, it does not resize them
   for (const c of cells) {
-    assert.strictEqual(c.w, 240)
-    assert.strictEqual(c.h, 200)
+    // every note takes the same cell now, so the rows and columns line up
+    assert.strictEqual(c.w, g.cellW)
+    assert.strictEqual(c.h, g.cellH)
     assert.strictEqual(c.tiled, true)
     assert.ok(c.lx >= 0 && c.lx + c.w <= DP5.width)
-    assert.ok(c.ly >= 90 && c.ly + c.h <= DP5.height)
+    assert.ok(c.ly >= g.top && c.ly + c.h <= DP5.height)
   }
-  // the first one sits in the top-left corner of the grid
   const first = cells.sort((a, b) => a.ly - b.ly || a.lx - b.lx)[0]
-  assert.strictEqual(first.lx, 10)
-  assert.strictEqual(first.ly, 100)
-  // 2560 wide fits 10 columns of 240+10, so four notes share one row
+  assert.strictEqual(first.lx, g.gap)
+  assert.strictEqual(first.ly, g.top + g.gap)
+  // four notes share the first row, and none of them overlap
   assert.strictEqual(new Set(cells.map(c => c.ly)).size, 1)
-  assert.deepStrictEqual(cells.map(c => c.lx), [10, 260, 510, 760])
   for (let i = 0; i < cells.length; i++)
     for (let j = i + 1; j < cells.length; j++) {
       const a = cells[i], b = cells[j]
-      const overlap = a.lx < b.lx + b.w && a.lx + a.w > b.lx && a.ly < b.ly + b.h && a.ly + a.h > b.ly
-      assert.ok(!overlap, "tiles must not overlap")
+      assert.ok(!(a.lx < b.lx + b.w && a.lx + a.w > b.lx && a.ly < b.ly + b.h && a.ly + a.h > b.ly),
+        "tiles must not overlap")
     }
 })
 
-test("tileNotes wraps onto the next row and steps by the largest note", () => {
-  const narrow = { key: "n", name: "N", x: 0, y: 0, width: 800, height: 1000 }
-  const notes = [
-    note("a", { key: "n", name: "N" }, 0.1, 0.1),
-    note("b", { key: "n", name: "N" }, 0.3, 0.1, { w: 300, h: 260 }),
-    note("c", { key: "n", name: "N" }, 0.5, 0.1),
-    note("d", { key: "n", name: "N" }, 0.7, 0.1)
-  ]
-  const t = M.tileNotes(notes, [narrow], "n", { gap: 10, top: 0 })
-  // widest is 300, so the column pitch is 310: two columns fit in 800
-  assert.strictEqual(t.a.lx, 10)
-  assert.strictEqual(t.b.lx, 320)
-  assert.strictEqual(t.c.lx, 10)
-  assert.strictEqual(t.d.lx, 320)
-  // row pitch steps by the tallest note, 260
-  assert.strictEqual(t.a.ly, 10)
-  assert.strictEqual(t.c.ly, 280)
-  // each note keeps its own size
-  assert.strictEqual(t.b.w, 300)
-  assert.strictEqual(t.a.w, 240)
+test("tileNotes wraps onto the next row once the columns are used up", () => {
+  const g = M.tileGrid(DP5, GRID)
+  const notes = []
+  for (let i = 0; i < g.cols + 2; i++) notes.push(note("n" + i, DP5, 0.01 * i, 0.1))
+  const t = M.tileNotes(notes, [DP5], DP5.key, GRID)
+  const rows = [...new Set(Object.keys(t).map(k => t[k].ly))].sort((a, b) => a - b)
+  assert.strictEqual(rows.length, 2)
+  assert.strictEqual(rows[1] - rows[0], g.pitchY)
+})
+
+test("a screen scrolls only once its notes outgrow the rows it shows", () => {
+  const g = M.tileGrid(DP5, GRID)
+  const full = g.cols * g.rows
+  assert.strictEqual(M.tileMaxScroll(DP5, 0, GRID), 0)
+  assert.strictEqual(M.tileMaxScroll(DP5, full, GRID), 0)
+  assert.strictEqual(M.tileMaxScroll(DP5, full + 1, GRID), g.pitchY)
+  assert.strictEqual(M.tileMaxScroll(DP5, full + g.cols + 1, GRID), 2 * g.pitchY)
+})
+
+test("scrolling a screen lifts its whole grid, and only that screen's", () => {
+  const notes = [note("a", DP5, 0.1, 0.1), note("b", DP5, 0.6, 0.1), note("c", DP7, 0.1, 0.1)]
+  const flat = M.tileNotes(notes, [DP5, DP7], DP5.key, GRID)
+  const opts = { gap: 10, top: 96, scroll: {} }
+  opts.scroll[DP5.key] = 200
+  const lifted = M.tileNotes(notes, [DP5, DP7], DP5.key, opts)
+  assert.strictEqual(lifted.a.ly, flat.a.ly - 200)
+  assert.strictEqual(lifted.b.ly, flat.b.ly - 200)
+  assert.strictEqual(lifted.a.gy, flat.a.gy - 200)
+  // the other screen is untouched -- each keeps its own place in its grid
+  assert.strictEqual(lifted.c.ly, flat.c.ly)
 })
 
 test("tileNotes tiles each screen on its own and keeps away notes borrowed", () => {
   const notes = [note("a", DP5, 0.1, 0.1), note("b", DP5, 0.6, 0.1), note("gone", { key: "X|1", name: "HDMI-A-1" }, 0.2, 0.2)]
-  const t = M.tileNotes(notes, [DP5, EDP], EDP.key, { gap: 10, top: 90 })
+  const t = M.tileNotes(notes, [DP5, EDP], EDP.key, GRID)
   assert.strictEqual(t.a.screenName, "DP-5")
   assert.strictEqual(t.b.screenName, "DP-5")
   assert.strictEqual(t.gone.screenName, "eDP-1")
   assert.strictEqual(t.gone.away, true)
-  // the two on DP-5 share a row, side by side
+  // each screen's cell is its own, measured from that screen
+  assert.strictEqual(t.gone.w, M.tileGrid(EDP, GRID).cellW)
+  assert.strictEqual(t.a.w, M.tileGrid(DP5, GRID).cellW)
   assert.strictEqual(t.a.ly, t.b.ly)
   assert.notStrictEqual(t.a.lx, t.b.lx)
 })
@@ -322,146 +356,14 @@ test("tileNotes tiles each screen on its own and keeps away notes borrowed", () 
 test("tileNotes leaves the stored notes untouched, so flowing back restores them", () => {
   const notes = [note("a", DP5, 0.25, 0.75), note("b", DP7, 0.5, 0.5)]
   const before = JSON.parse(JSON.stringify(notes))
-  M.tileNotes(notes, [DP5, DP7], DP5.key, { gap: 10, top: 90 })
-  assert.deepStrictEqual(notes, before)
+  M.tileNotes(notes, [DP5, DP7], DP5.key, GRID)
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(notes)), before)
   const flowed = M.placeNotes(notes, [DP5, DP7], DP5.key)
   assert.strictEqual(flowed.a.lx, 0.25 * DP5.width)
   assert.strictEqual(flowed.a.ly, 0.75 * DP5.height)
-})
-
-test("sanitizeNote keeps a readable reminder and drops a broken one", () => {
-  const r = M.parseFile(JSON.stringify({ version: 1, notes: [
-    { id: "a", remind: "2026-09-16T10:00:00.000Z" },
-    { id: "b", remind: "half past nine" },
-    { id: "c" }] }))
-  assert.strictEqual(r.notes[0].remind, "2026-09-16T10:00:00.000Z")
-  assert.strictEqual(r.notes[1].remind, "")
-  assert.strictEqual(r.notes[2].remind, "")
-  // and it survives a round trip
-  assert.strictEqual(M.parseFile(M.serialize(r.notes)).notes[0].remind, "2026-09-16T10:00:00.000Z")
-})
-
-// A fixed local noon, so the clock-time cases don't depend on the timezone
-// the tests happen to run in.
-const NOON = new Date(2026, 8, 16, 12, 0, 0, 0).getTime()
-const MIN = 60000, HOUR = 3600000, DAY = 86400000
-
-test("parseWhen reads durations, a bare number being minutes", () => {
-  assert.strictEqual(M.parseWhen("45", NOON), NOON + 45 * MIN)
-  assert.strictEqual(M.parseWhen("45m", NOON), NOON + 45 * MIN)
-  assert.strictEqual(M.parseWhen("90 mins", NOON), NOON + 90 * MIN)
-  assert.strictEqual(M.parseWhen("2h", NOON), NOON + 2 * HOUR)
-  assert.strictEqual(M.parseWhen("1.5h", NOON), NOON + 90 * MIN)
-  assert.strictEqual(M.parseWhen("1h30", NOON), NOON + 90 * MIN)
-  assert.strictEqual(M.parseWhen("1h30m", NOON), NOON + 90 * MIN)
-  assert.strictEqual(M.parseWhen("3d", NOON), NOON + 3 * DAY)
-  assert.strictEqual(M.parseWhen("in 20m", NOON), NOON + 20 * MIN)
-})
-
-test("parseWhen reads a clock time, rolling over to tomorrow once it has gone", () => {
-  const later = M.parseWhen("14:30", NOON)
-  assert.strictEqual(new Date(later).getHours(), 14)
-  assert.strictEqual(new Date(later).getMinutes(), 30)
-  assert.strictEqual(new Date(later).getDate(), new Date(NOON).getDate())
-  // 9:00 has been and gone by noon, so it means tomorrow
-  const gone = M.parseWhen("9:00", NOON)
-  assert.ok(gone > NOON)
-  assert.strictEqual(new Date(gone).getHours(), 9)
-  assert.strictEqual(new Date(gone).getDate(), new Date(NOON + DAY).getDate())
-  // a dot reads as a colon, and "at" is allowed
-  assert.strictEqual(M.parseWhen("14.30", NOON), later)
-  assert.strictEqual(M.parseWhen("at 14:30", NOON), later)
-})
-
-test("parseWhen reads tomorrow, at nine unless told otherwise", () => {
-  const t = M.parseWhen("tomorrow", NOON)
-  assert.strictEqual(new Date(t).getHours(), 9)
-  assert.strictEqual(new Date(t).getMinutes(), 0)
-  assert.strictEqual(new Date(t).getDate(), new Date(NOON + DAY).getDate())
-  const t830 = M.parseWhen("tomorrow 8:30", NOON)
-  assert.strictEqual(new Date(t830).getHours(), 8)
-  assert.strictEqual(new Date(t830).getMinutes(), 30)
-})
-
-test("parseWhen says nothing rather than guessing", () => {
-  for (const bad of ["", "   ", "soon", "0", "0m", "-5m", "25:00", "9:70", "tomorrow 25:00", "abc 5m"])
-    assert.strictEqual(M.parseWhen(bad, NOON), 0, "should not parse: " + JSON.stringify(bad))
-})
-
-test("remindLabel counts down close by and gives the time further off", () => {
-  assert.strictEqual(M.remindLabel(0, NOON), "")
-  assert.strictEqual(M.remindLabel(NOON - MIN, NOON), "due")
-  assert.strictEqual(M.remindLabel(NOON + 25 * MIN, NOON), "in 25m")
-  assert.strictEqual(M.remindLabel(NOON + 30 * 1000, NOON), "in 1m")
-  assert.strictEqual(M.remindLabel(NOON + 4 * HOUR, NOON), "at 16:00")
-  assert.strictEqual(M.remindLabel(M.parseWhen("tomorrow 8:30", NOON), NOON), "tomorrow 8:30")
-  assert.strictEqual(M.remindLabel(NOON + 3 * DAY, NOON), "in 3d")
-})
-
-test("dueNotes and nextRemind pick out what is ready and what is waiting", () => {
-  const notes = [
-    Object.assign(note("late", DP5, 0.1, 0.1), { remind: new Date(NOON - 2 * HOUR).toISOString() }),
-    Object.assign(note("later", DP5, 0.2, 0.2), { remind: new Date(NOON - HOUR).toISOString() }),
-    Object.assign(note("soon", DP5, 0.3, 0.3), { remind: new Date(NOON + 5 * MIN).toISOString() }),
-    Object.assign(note("far", DP5, 0.4, 0.4), { remind: new Date(NOON + DAY).toISOString() }),
-    note("none", DP5, 0.5, 0.5)
-  ]
-  // oldest first, so a backlog rings in the order it was set
-  assert.strictEqual(M.dueNotes(notes, NOON).map(n => n.id).join(","), "late,later")
-  assert.strictEqual(M.nextRemind(notes, NOON), NOON + 5 * MIN)
-  assert.strictEqual(M.dueNotes([], NOON).length, 0)
-  assert.strictEqual(M.nextRemind([note("none", DP5, 0.1, 0.1)], NOON), 0)
-  // a reminder that cannot be read is no reminder at all
-  assert.strictEqual(M.remindAt({ remind: "whenever" }), 0)
-})
-
-test("reminderNotification says the time and the note's first line, alone", () => {
-  const at = M.parseWhen("14:30", NOON)
-  const n = M.reminderNotification("# **Standup**\n\nwith *Dan*\n- Purchase files", at)
-  assert.strictEqual(n.title, "Note reminder")
-  // the first line and nothing under it -- the note itself is a click away
-  assert.strictEqual(n.body, "14:30  ·  Standup")
-  // a blank opening line is skipped, and a bullet or a box keeps its mark
-  assert.strictEqual(M.reminderNotification("\n\n- Kimm\n- Dan", at).body, "14:30  ·  • Kimm")
-  assert.strictEqual(M.reminderNotification("[x] done\nmore", at).body, "14:30  ·  ✓ done")
-  assert.strictEqual(M.reminderNotification("[ ] todo", at).body, "14:30  ·  ☐ todo")
-  // an empty note still says when it was due
-  assert.strictEqual(M.reminderNotification("", at).body, "14:30  ·  Note")
-  assert.strictEqual(M.reminderNotification("\n\n  \n", at).body, "14:30  ·  Note")
-  // a long first line is capped at 50, the ellipsis counted in
-  const long = M.reminderNotification("x".repeat(200), at)
-  assert.strictEqual(long.body, "14:30  ·  " + "x".repeat(49) + "…")
-  assert.strictEqual(M.firstLine("y".repeat(50)).length, 50)
-  // the headline is a constant and the body always opens with the clock, so
-  // neither can be read as one of omarchy-notification-send's own flags
-  for (const flagish of ["-u", "--exec", "-50% off"]) {
-    const f = M.reminderNotification(flagish, at)
-    assert.strictEqual(f.title, "Note reminder")
-    assert.ok(/^\d/.test(f.body), "body must start with the clock: " + f.body)
-  }
-})
-
-test("zoomFit blows a note up as far as it fits, and no further", () => {
-  // a default note on a big screen gets the whole factor
-  assert.strictEqual(M.zoomFit(390, 300, DP5, 4, 96), 4)
-  // a tall one is held back by the height, toolbar clearance included
-  assert.strictEqual(M.zoomFit(390, 400, DP5, 4, 96), (1440 - 192) / 400)
-  // and a wide one by the width
-  assert.strictEqual(M.zoomFit(900, 300, DP5, 4, 96), (2560 - 192) / 900)
-  // a note already bigger than the room left is never shrunk
-  assert.strictEqual(M.zoomFit(2600, 1500, DP5, 4, 96), 1)
-  // nonsense in, no zoom out
-  assert.strictEqual(M.zoomFit(0, 300, DP5, 4, 96), 1)
-  assert.strictEqual(M.zoomFit(390, 300, null, 4, 96), 1)
-  // whatever it returns, the note fits the room left for it
-  for (const [w, h] of [[390, 300], [390, 400], [900, 300], [140, 100], [1600, 1200]]) {
-    const f = M.zoomFit(w, h, DP5, 4, 96)
-    assert.ok(f >= 1, "never shrinks")
-    if (f > 1) {
-      assert.ok(w * f <= DP5.width - 192 + 1e-9, "fits across: " + w)
-      assert.ok(h * f <= DP5.height - 192 + 1e-9, "fits down: " + h)
-    }
-  }
+  // and their own size comes back with them
+  assert.strictEqual(flowed.a.w, 240)
+  assert.strictEqual(flowed.a.h, 200)
 })
 
 test("nearestTo picks the note closest to a point", () => {

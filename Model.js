@@ -239,18 +239,52 @@ function freeSpot(lx, ly, w, h, s, taken) {
 
 // ------------------------------------------------------------------ tiling
 
-// Line every note up in a grid on the screen it is already on, filled from
-// the top left across and then down. Notes keep their own size; the grid
-// steps by the widest and tallest note on that screen, so the columns and
-// rows line up even when the notes differ.
-//
-// Nothing is written down: the stored position is untouched, so letting
-// them flow again puts everything back exactly where it was.
-//   opts: { gap, top }  -- top keeps the grid clear of the bar and toolbar
-function tileNotes(notes, screens, fallbackKey, opts) {
+// How many rows of notes a screen shows at once. Past this the board
+// scrolls rather than shrinking the notes any further -- a note too small
+// to read is not a note.
+var TILE_ROWS = 3
+
+// The grid a screen gets. The cell is measured from the screen itself:
+// three rows standing in its height, and as many columns across as sit
+// comfortably at a note's own four-to-five shape. The columns then share
+// out whatever is left over, so the grid meets both edges instead of
+// trailing off short of one.
+//   opts: { gap, top, rows } -- top keeps the grid clear of the bar and toolbar
+//   -> { cols, rows, cellW, cellH, gap, top, pitchX, pitchY }
+function tileGrid(s, opts) {
   opts = opts || {}
   var gap = opts.gap === undefined ? 12 : opts.gap
   var top = opts.top || 0
+  var rows = Math.max(1, Math.round(opts.rows || TILE_ROWS))
+  var cellH = Math.max(MIN_H, Math.floor((s.height - top - (rows + 1) * gap) / rows))
+  // What a cell this tall would be if it kept a note's shape, and then the
+  // nearest whole number of those that crosses the screen.
+  var ideal = cellH * (DEFAULT_W / DEFAULT_H)
+  var cols = Math.max(1, Math.round((s.width - gap) / (ideal + gap)))
+  var cellW = Math.max(MIN_W, Math.floor((s.width - (cols + 1) * gap) / cols))
+  return { cols: cols, rows: rows, cellW: cellW, cellH: cellH, gap: gap, top: top,
+           pitchX: cellW + gap, pitchY: cellH + gap }
+}
+
+// How far a screen's grid can be scrolled: nothing at all while its notes
+// stand in the rows it shows, and one row's step for every row past them.
+function tileMaxScroll(s, count, opts) {
+  var g = tileGrid(s, opts)
+  var rows = Math.ceil(Math.max(0, count) / g.cols)
+  return Math.max(0, (rows - g.rows) * g.pitchY)
+}
+
+// Line every note up in a grid on the screen it is already on, filled from
+// the top left across and then down. The cells are the screen's, not the
+// notes' -- every note takes the same one, so the rows and the columns line
+// up and the grid fits the screen it is on.
+//
+// Nothing is written down: the stored position and size are untouched, so
+// letting them flow again puts everything back exactly as it was.
+//   opts: { gap, top, rows, scroll }  -- scroll is screen key -> pixels down
+function tileNotes(notes, screens, fallbackKey, opts) {
+  opts = opts || {}
+  var scroll = opts.scroll || {}
   var base = placeNotes(notes, screens, fallbackKey)
   var groups = {}
   for (var id in base) {
@@ -268,26 +302,17 @@ function tileNotes(notes, screens, fallbackKey, opts) {
       if (Math.abs(a.ly - b.ly) > 40) return a.ly - b.ly
       return a.lx - b.lx
     })
-    var cellW = 0, cellH = 0
-    for (var i = 0; i < list.length; i++) {
-      cellW = Math.max(cellW, list[i].w)
-      cellH = Math.max(cellH, list[i].h)
-    }
-    var cols = Math.max(1, Math.floor((s.width - gap) / (cellW + gap)))
+    var g = tileGrid(s, opts)
+    var off = num(scroll[key], 0)
     for (var j = 0; j < list.length; j++) {
-      var p = list[j]
-      var r = Math.floor(j / cols)
-      var c = j % cols
-      var lx = gap + c * (cellW + gap)
-      var ly = top + gap + r * (cellH + gap)
-      // More notes than fit down the screen: keep the tail on screen
-      // rather than off the bottom edge.
-      ly = Math.min(ly, Math.max(top + gap, s.height - p.h - gap))
-      out[p.id] = {
-        id: p.id, screenKey: s.key, screenName: s.name,
-        away: p.away, homeLabel: p.homeLabel,
+      var p2 = list[j]
+      var lx = g.gap + (j % g.cols) * g.pitchX
+      var ly = g.top + g.gap + Math.floor(j / g.cols) * g.pitchY - off
+      out[p2.id] = {
+        id: p2.id, screenKey: s.key, screenName: s.name,
+        away: p2.away, homeLabel: p2.homeLabel,
         lx: lx, ly: ly, gx: s.x + lx, gy: s.y + ly,
-        w: p.w, h: p.h, tiled: true
+        w: g.cellW, h: g.cellH, tiled: true
       }
     }
   }

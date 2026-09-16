@@ -54,6 +54,17 @@ PanelWindow {
       easing.type: Easing.OutQuint
     }
 
+    // Tiled, the board itself scrolls once the notes run past the rows the
+    // screen shows. The wheel over a note still scrolls that note; this
+    // catches the glass between and around them.
+    WheelHandler {
+      enabled: win.overlay.tiled && win.overlay.maxTileScroll(win.screenName) > 0
+      onWheel: function(event) {
+        win.overlay.scrollTile(win.screenName, -event.angleDelta.y)
+        event.accepted = true
+      }
+    }
+
     // Empty glass: a click takes the keyboard to this screen and ends any
     // editing; a double-click drops a new note under the pointer.
     MouseArea {
@@ -133,7 +144,8 @@ PanelWindow {
             var n = win.store ? win.store.count : 0
             var s = n === 1 ? "1 note" : n + " notes"
             if (win.overlay.awayCount > 0) s += "  ·  " + win.overlay.awayCount + " away"
-            if (win.overlay.tiled) s += "  ·  tiled"
+            if (win.overlay.tiled) s += win.overlay.maxTileScroll(win.screenName) > 0
+              ? "  ·  tiled, scrolls" : "  ·  tiled"
             return s
           }
           color: win.overlay.tiled ? Color.accent : Color.foreground

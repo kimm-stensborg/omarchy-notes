@@ -63,6 +63,10 @@ Item {
   // Room at the top of a tiled screen for the bar and the toolbar.
   readonly property int tileTop: Style.space(96)
   readonly property int tileGap: Math.max(Style.space(10), Style.gapsOut * 2)
+  // Tiled, each screen's grid scrolls on its own: they hold different
+  // numbers of notes and are not all the same size. Screen key -> pixels down.
+  property var tileScroll: ({})
+  readonly property var tileOpts: ({ gap: root.tileGap, top: root.tileTop, scroll: root.tileScroll })
 
   // Hyprland's name for a Quickshell screen.
   function screenName(screen) {
@@ -107,8 +111,7 @@ Item {
   readonly property var placements: {
     if (!root.store) return ({})
     if (root.tiled)
-      return Model.tileNotes(root.store.notes, root.screens, root.fallbackKey,
-                             { gap: root.tileGap, top: root.tileTop })
+      return Model.tileNotes(root.store.notes, root.screens, root.fallbackKey, root.tileOpts)
     return root.basePlacements
   }
 
@@ -132,6 +135,7 @@ Item {
     root.confirmingId = ""
     root.remindingId = ""
     root.zoomedId = ""
+    root.tileScroll = ({})
     root.now = Date.now()
     if (root.store) root.store.refreshMonitors()
     root.opened = true
@@ -207,7 +211,10 @@ Item {
 
   // Alt+T lines them up, and puts them back. Remembered until it is pressed
   // again, hiding the board included.
-  function toggleTile() { if (root.store) root.store.setTiled(!root.store.tiled) }
+  function toggleTile() {
+    root.tileScroll = ({})
+    if (root.store) root.store.setTiled(!root.store.tiled)
+  }
 
   // ------------------------------------------------------------ selection
 
@@ -218,6 +225,7 @@ Item {
     root.selectedId = id
     var p = root.placements[id]
     if (p) root.activeScreen = p.screenName
+    root.revealSelected()
   }
 
   // Alt + arrow. With nothing selected yet, start from the note nearest the
@@ -295,6 +303,47 @@ Item {
   }
 
   function cancelRemind() { root.remindingId = "" }
+
+  // ---------------------------------------------------------------- scroll
+
+  function notesOnScreen(key) {
+    var n = 0, p = root.basePlacements
+    for (var id in p) if (p[id].screenKey === key) n++
+    return n
+  }
+
+  // Nothing while a screen's notes stand in the rows it shows.
+  function maxTileScroll(name) {
+    var s = root.screenInfo(name)
+    if (!s || !root.tiled) return 0
+    return Model.tileMaxScroll(s, root.notesOnScreen(s.key), root.tileOpts)
+  }
+
+  function scrollTile(name, dy) {
+    var s = root.screenInfo(name)
+    if (!s || !root.tiled) return
+    var cur = root.tileScroll[s.key] || 0
+    var next = Math.max(0, Math.min(root.maxTileScroll(name), cur + dy))
+    if (next === cur) return
+    var m = ({})
+    for (var k in root.tileScroll) m[k] = root.tileScroll[k]
+    m[s.key] = next
+    root.tileScroll = m
+  }
+
+  // Arrowing onto a note in a row that is off the bottom brings it into
+  // view, rather than moving the selection somewhere you cannot see.
+  function revealSelected() {
+    if (!root.tiled || !root.selectedId) return
+    var p = root.placements[root.selectedId]
+    if (!p) return
+    var s = root.screenInfo(p.screenName)
+    if (!s) return
+    var floor = s.height - root.tileGap
+    var ceiling = root.tileTop + root.tileGap
+    if (p.ly + p.h > floor) root.scrollTile(p.screenName, p.ly + p.h - floor)
+    else if (p.ly < ceiling) root.scrollTile(p.screenName, p.ly - ceiling)
+  }
 
   // ------------------------------------------------------------------ zoom
 
