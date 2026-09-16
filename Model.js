@@ -6,8 +6,9 @@
 // covers it.
 
 var VERSION = 1
-var DEFAULT_W = 390
-var DEFAULT_H = 300
+// A note stands as a portrait card, four across to five down.
+var DEFAULT_W = 400
+var DEFAULT_H = 500
 var MIN_W = 140
 var MIN_H = 100
 var MAX_W = 1600

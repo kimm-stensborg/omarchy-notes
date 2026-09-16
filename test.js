@@ -98,6 +98,17 @@ test("spawnLocal puts a new note near the upper middle of its screen", () => {
   assert.strictEqual(p.ly, DP5.height * 0.25)
 })
 
+test("a new note is a portrait card, four across to five down", () => {
+  assert.strictEqual(M.DEFAULT_W / M.DEFAULT_H, 4 / 5)
+  assert.ok(M.DEFAULT_W >= M.MIN_W && M.DEFAULT_W <= M.MAX_W)
+  assert.ok(M.DEFAULT_H >= M.MIN_H && M.DEFAULT_H <= M.MAX_H)
+  // and it fits a screen with room to spare, so it is never born clamped
+  const p = M.placeNotes([{ id: "a", text: "", z: 0, monitor: { key: DP5.key, name: "DP-5" },
+                            x: 0.1, y: 0.1, w: M.DEFAULT_W, h: M.DEFAULT_H }], [DP5], DP5.key)
+  assert.strictEqual(p.a.w, M.DEFAULT_W)
+  assert.strictEqual(p.a.h, M.DEFAULT_H)
+})
+
 test("placeNotes: home present lands on its own screen", () => {
   const p = M.placeNotes([note("a", DP5, 0.5, 0.5)], [DP7, DP5, EDP], DP7.key)
   assert.strictEqual(p.a.screenName, "DP-5")
