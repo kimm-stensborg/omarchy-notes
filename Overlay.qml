@@ -40,9 +40,11 @@ Item {
   property string selectedId: ""
   // The note waiting on a yes/no before it is deleted.
   property string confirmingId: ""
-  // Alt+T lays them out in a grid, Alt+F lets them flow back home. This is
-  // a way of looking at the board, not a change to it: nothing is written.
-  property bool tiled: false
+  // Alt+T lays them out in a grid, and lets them flow back home again. It
+  // is a way of looking at the board, not a change to it -- no note moves
+  // on disk -- but the choice itself is remembered by the store, so the
+  // grid is still there the next time the board is summoned.
+  readonly property bool tiled: !!root.store && root.store.tiled
 
   // Room at the top of a tiled screen for the bar and the toolbar.
   readonly property int tileTop: Style.space(96)
@@ -82,12 +84,18 @@ Item {
     return s ? s.key : ""
   }
 
+  // Where the notes sit when they flow. A new note is placed against these
+  // and not against the grid, so what is written down stays true once the
+  // notes flow back.
+  readonly property var basePlacements: root.store
+    ? Model.placeNotes(root.store.notes, root.screens, root.fallbackKey) : ({})
+
   readonly property var placements: {
     if (!root.store) return ({})
     if (root.tiled)
       return Model.tileNotes(root.store.notes, root.screens, root.fallbackKey,
                              { gap: root.tileGap, top: root.tileTop })
-    return Model.placeNotes(root.store.notes, root.screens, root.fallbackKey)
+    return root.basePlacements
   }
 
   readonly property int awayCount: {
@@ -106,7 +114,6 @@ Item {
     root.editingId = ""
     root.selectedId = ""
     root.confirmingId = ""
-    root.tiled = false
     if (root.store) root.store.refreshMonitors()
     root.opened = true
   }
@@ -117,7 +124,6 @@ Item {
     root.editingId = ""
     root.selectedId = ""
     root.confirmingId = ""
-    root.tiled = false
   }
 
   function dismiss() {
@@ -134,11 +140,23 @@ Item {
 
   // --------------------------------------------------------------- actions
 
-  // lx, ly: the new note's top-left in that screen's local pixels.
+  // The top-left of every note already flowing on one screen, in its local
+  // pixels, so a new one can be kept clear of them.
+  function spotsOn(name) {
+    var out = []
+    var p = root.basePlacements
+    for (var id in p) if (p[id].screenName === name) out.push({ lx: p[id].lx, ly: p[id].ly })
+    return out
+  }
+
+  // lx, ly: the new note's top-left in that screen's local pixels. A note
+  // already sitting there pushes the new one down and to the right: laid
+  // exactly over another it would look like nothing had happened at all.
   function createAt(name, lx, ly) {
     var s = root.screenInfo(name)
     if (!s || !root.store) return
-    var f = Model.toFractions(lx, ly, Model.DEFAULT_W, Model.DEFAULT_H, s)
+    var free = Model.freeSpot(lx, ly, Model.DEFAULT_W, Model.DEFAULT_H, s, root.spotsOn(name))
+    var f = Model.toFractions(free.lx, free.ly, Model.DEFAULT_W, Model.DEFAULT_H, s)
     root.activeScreen = name
     root.selectedId = root.store.create(name, f.x, f.y)
   }
@@ -146,14 +164,15 @@ Item {
   function createOn(name) {
     var s = root.screenInfo(name)
     if (!s || !root.store) return
-    var p = Model.spawnLocal(s, root.store.count)
+    var p = Model.spawnLocal(s)
     root.createAt(name, p.lx, p.ly)
   }
 
   // --------------------------------------------------------------- tiling
 
-  // Alt+T lines them up, and puts them back.
-  function toggleTile() { root.tiled = !root.tiled }
+  // Alt+T lines them up, and puts them back. Remembered until it is pressed
+  // again, hiding the board included.
+  function toggleTile() { if (root.store) root.store.setTiled(!root.store.tiled) }
 
   // ------------------------------------------------------------ selection
 
@@ -190,6 +209,9 @@ Item {
   function editSelected() {
     if (!root.selectedId || !root.placements[root.selectedId]) return
     root.select(root.selectedId)
+    // Arrowing past a note only lifts it while you are on it; writing in
+    // one is a commitment, and leaves it on top of the pile as a click does.
+    if (root.store) root.store.raise(root.selectedId)
     root.editingId = root.selectedId
   }
 
@@ -242,7 +264,7 @@ Item {
           monitor: { key: target.key, name: target.name, label: target.label },
           x: f.x, y: f.y
         })
-        root.tiled = false
+        root.store.setTiled(false)
       }
     }
     root.drag = null

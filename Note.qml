@@ -80,7 +80,12 @@ Item {
   y: card.gy - card.sy
   width: card.placement ? card.placement.w : 0
   height: card.placement ? card.placement.h : 0
-  z: card.dragging ? 99999 : (card.note ? card.note.z : 0)
+  // Stacking. Notes keep the order they were last clicked into, but the one
+  // you are on is lifted clear of the pile the moment you reach it -- by
+  // Alt + arrow as much as by a click -- so a note buried under another is
+  // never read through it. The one being dragged rides over everything.
+  readonly property int restZ: card.note ? card.note.z : 0
+  z: card.restZ + (card.dragging ? 2000000 : (card.focused ? 1000000 : 0))
 
   // Tiling and untiling slide the cards into place instead of teleporting
   // them, but a note under the pointer must never lag behind it.

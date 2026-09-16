@@ -12,17 +12,22 @@ border and font, with Hyprland's corner rounding.
 ## What it does
 
 - **SUPER + N** shows the board on all monitors. Esc hides it.
-- **New notes:** "+ New note", `N`, or a double-click on empty space.
+- **New notes:** "+ New note", `N`, or a double-click on empty space. A new
+  note never lands exactly on one already there -- it steps down and to the
+  right until it has a place of its own, so it can't hide inside another.
 - **Writing:** click a note to write in it. The note you're on wears the
-  active window border.
+  active window border and comes to the front of the pile, so a note under
+  another is never read through it.
 - **Moving:** notes have no title bar -- drag the note itself, anywhere on
   it, including from one monitor to another. `SUPER` + drag works too, as
   Hyprland moves windows, where the compositor lets it through.
 - **Tiling:** `Alt+T` lines every note up in a grid on its own screen,
   filled from the top left, and `Alt+T` again lets them flow back to where
   they were. Notes keep their own size; the grid steps by the largest note
-  on that screen so the columns and rows line up. Tiling changes nothing on
-  disk, so nothing is lost; moving a note by hand also ends the tiled view.
+  on that screen so the columns and rows line up. Tiling moves no note on
+  disk, so nothing is lost, but the grid itself is remembered until you
+  press `Alt+T` again -- hiding the board, or restarting the shell, leaves
+  it be. Moving a note by hand also ends the tiled view.
 - **Deleting:** `Del` (or a right-click) deletes the note you're on, after a
   yes or no. `Ctrl+Z` brings it back.
 - **Theme:** everything follows `omarchy theme set`.
@@ -101,7 +106,7 @@ note and moves to the next one.
 
 | File | What |
 |---|---|
-| `~/Documents/notes.json` | Your notes. Plain JSON, written atomically, safe to edit by hand; the board picks up the change. |
+| `~/Documents/notes.json` | Your notes, and whether the board is tiled. Plain JSON, written atomically, safe to edit by hand; the board picks up the change. |
 | `Model.js` | File format, monitor identity, placement, tiling and markdown logic |
 | `Store.qml` | Service: loads and saves the file, and knows which monitor is which |
 | `Overlay.qml` / `NoteWindow.qml` / `Note.qml` | The board: one window per screen, and the notes on it |

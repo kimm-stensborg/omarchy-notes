@@ -14,6 +14,9 @@ var MAX_W = 1600
 var MAX_H = 1600
 var CASCADE = 28
 var MARGIN = 8
+// Two notes whose corners are closer than this are, to the eye, in the same
+// place: the one underneath is hidden completely and looks lost.
+var OVERLAP = 4
 
 function str(v) { return v === undefined || v === null ? "" : String(v).trim() }
 function num(v, d) { var n = Number(v); return isFinite(n) ? n : d }
@@ -72,18 +75,26 @@ function sanitizeNote(raw, i) {
   }
 }
 
-// -> { ok, notes, error }. An empty or missing file is a valid empty board;
-// anything unparseable is not ok, so the caller can keep it aside instead
-// of overwriting it with an empty list.
+// How the board is being looked at, as opposed to what is on it. Kept with
+// the notes so the grid is still there after the board is hidden, or the
+// shell restarted.
+function sanitizeView(raw) {
+  if (!raw || typeof raw !== "object") raw = {}
+  return { tiled: raw.tiled === true }
+}
+
+// -> { ok, notes, view, error }. An empty or missing file is a valid empty
+// board; anything unparseable is not ok, so the caller can keep it aside
+// instead of overwriting it with an empty list.
 function parseFile(text) {
   var t = str(text)
-  if (!t) return { ok: true, notes: [], error: "" }
+  if (!t) return { ok: true, notes: [], view: sanitizeView(null), error: "" }
   var data
   try { data = JSON.parse(t) } catch (e) {
-    return { ok: false, notes: [], error: String(e && e.message ? e.message : e) }
+    return { ok: false, notes: [], view: sanitizeView(null), error: String(e && e.message ? e.message : e) }
   }
   var list = Array.isArray(data) ? data : (data && Array.isArray(data.notes) ? data.notes : null)
-  if (!list) return { ok: false, notes: [], error: "no notes array" }
+  if (!list) return { ok: false, notes: [], view: sanitizeView(null), error: "no notes array" }
   var notes = [], seen = {}
   for (var i = 0; i < list.length; i++) {
     var n = sanitizeNote(list[i], i)
@@ -94,11 +105,11 @@ function parseFile(text) {
     seen[id] = true
     notes.push(n)
   }
-  return { ok: true, notes: notes, error: "" }
+  return { ok: true, notes: notes, view: sanitizeView(data && data.view), error: "" }
 }
 
-function serialize(notes) {
-  return JSON.stringify({ version: VERSION, notes: notes || [] }, null, 2) + "\n"
+function serialize(notes, view) {
+  return JSON.stringify({ version: VERSION, view: sanitizeView(view), notes: notes || [] }, null, 2) + "\n"
 }
 
 function newId(nowMs, rand) {
@@ -164,23 +175,17 @@ function placeNotes(notes, screens, fallbackKey) {
     else borrowed.push(list[i])
   }
   ordered = ordered.concat(borrowed)
-  var taken = []
+  var taken = {}
   for (var j = 0; j < ordered.length; j++) {
     var note = ordered[j]
     var home = homeScreen(note, screens)
     var s = home || fallback
     var size = fitSize(note, s)
-    var pos = clampLocal(note.x * s.width, note.y * s.height, size.w, size.h, s)
-    if (!home) {
-      var guard = 0
-      while (collides(taken, s.key, pos.lx, pos.ly) && guard++ < 64) {
-        var nx = pos.lx + CASCADE, ny = pos.ly + CASCADE
-        if (nx > s.width - size.w - MARGIN) nx = MARGIN + (guard % 4) * 6
-        if (ny > s.height - size.h - MARGIN) ny = MARGIN + (guard % 4) * 6
-        pos = { lx: nx, ly: ny }
-      }
-    }
-    taken.push({ key: s.key, lx: pos.lx, ly: pos.ly })
+    if (!taken[s.key]) taken[s.key] = []
+    var pos = home
+      ? clampLocal(note.x * s.width, note.y * s.height, size.w, size.h, s)
+      : freeSpot(note.x * s.width, note.y * s.height, size.w, size.h, s, taken[s.key])
+    taken[s.key].push({ lx: pos.lx, ly: pos.ly })
     var mon = note.monitor || {}
     out[note.id] = {
       id: note.id,
@@ -196,12 +201,28 @@ function placeNotes(notes, screens, fallbackKey) {
   return out
 }
 
-function collides(taken, key, lx, ly) {
-  for (var i = 0; i < taken.length; i++) {
-    var t = taken[i]
-    if (t.key === key && Math.abs(t.lx - lx) < 4 && Math.abs(t.ly - ly) < 4) return true
-  }
+// Is a note already sitting at this corner, near enough to hide one put
+// there?  taken: [{ lx, ly }] on one screen.
+function spotTaken(taken, lx, ly) {
+  for (var i = 0; i < (taken || []).length; i++)
+    if (Math.abs(taken[i].lx - lx) < OVERLAP && Math.abs(taken[i].ly - ly) < OVERLAP) return true
   return false
+}
+
+// The place a note asked for, or -- when a note is already there -- the
+// nearest free one down and to the right of it, so no note is ever laid
+// exactly over another and lost behind it. Wraps back to the top left
+// corner when the cascade runs off the screen.
+function freeSpot(lx, ly, w, h, s, taken) {
+  var pos = clampLocal(lx, ly, w, h, s)
+  var guard = 0
+  while (spotTaken(taken, pos.lx, pos.ly) && guard++ < 64) {
+    var nx = pos.lx + CASCADE, ny = pos.ly + CASCADE
+    if (nx > s.width - w - MARGIN) nx = MARGIN + (guard % 4) * 6
+    if (ny > s.height - h - MARGIN) ny = MARGIN + (guard % 4) * 6
+    pos = clampLocal(nx, ny, w, h, s)
+  }
+  return pos
 }
 
 // ------------------------------------------------------------------ tiling
@@ -287,11 +308,10 @@ function intersects(p, s) {
   return p.gx < s.x + s.width && p.gx + p.w > s.x && p.gy < s.y + s.height && p.gy + p.h > s.y
 }
 
-// Where the n-th note made with the button lands: near the upper middle,
-// stepping down and right so a burst of new notes fans out.
-function spawnLocal(s, n) {
-  var step = (n % 6) * CASCADE
-  return { lx: (s.width - DEFAULT_W) / 2 - 2 * CASCADE + step, ly: s.height * 0.25 + step }
+// Where a note made with the button lands: near the upper middle. A burst
+// of them fans out from there, as freeSpot steps each one clear of the last.
+function spawnLocal(s) {
+  return { lx: (s.width - DEFAULT_W) / 2, ly: s.height * 0.25 }
 }
 
 // ---------------------------------------------------------------- markdown

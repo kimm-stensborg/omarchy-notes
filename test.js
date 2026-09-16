@@ -64,6 +64,40 @@ test("parseFile sanitizes, dedupes ids, drops old post-it fields, round-trips", 
   assert.deepStrictEqual(JSON.parse(JSON.stringify(again.notes)), JSON.parse(JSON.stringify(r.notes)))
 })
 
+test("parseFile and serialize carry the grid view, defaulting to flowing", () => {
+  assert.strictEqual(M.parseFile("").view.tiled, false)
+  assert.strictEqual(M.parseFile('{"version":1,"notes":[]}').view.tiled, false)
+  assert.strictEqual(M.parseFile('{"version":1,"view":{"tiled":true},"notes":[]}').view.tiled, true)
+  assert.strictEqual(M.parseFile('{"version":1,"view":"yes","notes":[]}').view.tiled, false)
+  assert.strictEqual(M.parseFile("[]").view.tiled, false)
+  assert.strictEqual(M.parseFile(M.serialize([], { tiled: true })).view.tiled, true)
+  assert.strictEqual(M.parseFile(M.serialize([], { tiled: false })).view.tiled, false)
+  assert.strictEqual(M.parseFile(M.serialize([])).view.tiled, false)
+})
+
+test("freeSpot leaves a clear spot alone and steps off an occupied one", () => {
+  const clear = M.freeSpot(400, 300, 240, 200, DP5, [{ lx: 900, ly: 900 }])
+  assert.deepStrictEqual([clear.lx, clear.ly], [400, 300])
+  // a note already there, and one on the first step off it
+  const taken = [{ lx: 400, ly: 300 }, { lx: 400 + M.CASCADE, ly: 300 + M.CASCADE }]
+  const moved = M.freeSpot(400, 300, 240, 200, DP5, taken)
+  assert.deepStrictEqual([moved.lx, moved.ly], [400 + 2 * M.CASCADE, 300 + 2 * M.CASCADE])
+  // never exactly on top, however many pile up in the same place
+  let spots = []
+  for (let i = 0; i < 40; i++) {
+    const p = M.freeSpot(400, 300, 240, 200, DP5, spots)
+    assert.ok(!spots.some(q => Math.abs(q.lx - p.lx) < 4 && Math.abs(q.ly - p.ly) < 4), "spot " + i + " repeats")
+    assert.ok(p.lx + 240 <= DP5.width && p.ly + 200 <= DP5.height, "spot " + i + " is off screen")
+    spots.push(p)
+  }
+})
+
+test("spawnLocal puts a new note near the upper middle of its screen", () => {
+  const p = M.spawnLocal(DP5)
+  assert.strictEqual(p.lx, (DP5.width - M.DEFAULT_W) / 2)
+  assert.strictEqual(p.ly, DP5.height * 0.25)
+})
+
 test("placeNotes: home present lands on its own screen", () => {
   const p = M.placeNotes([note("a", DP5, 0.5, 0.5)], [DP7, DP5, EDP], DP7.key)
   assert.strictEqual(p.a.screenName, "DP-5")

@@ -30,6 +30,10 @@ Item {
   property string loadError: ""
   property string lastWritten: ""
   property var lastDeleted: null
+  // How the board is being looked at rather than what is on it: kept in the
+  // same file, so the grid outlives hiding the board and restarting the
+  // shell, and only a toggle (or moving a note by hand) puts it back.
+  property bool tiled: false
   // The note just created, so its card opens ready to type in.
   property string pendingEditId: ""
 
@@ -111,11 +115,18 @@ Item {
     root.update(id, { z: top + 1 }, false)
   }
 
+  function setTiled(on) {
+    on = !!on
+    if (root.tiled === on) return
+    root.tiled = on
+    saveTimer.restart()
+  }
+
   // ------------------------------------------------------------ persistence
 
   function save() {
     if (!root.loaded) return
-    var text = Model.serialize(root.notes)
+    var text = Model.serialize(root.notes, { tiled: root.tiled })
     root.lastWritten = text
     notesFile.setText(text)
   }
@@ -138,6 +149,7 @@ Item {
     }
     root.loadError = ""
     root.replaceAll(result.notes)
+    root.tiled = result.view.tiled
     root.loaded = true
   }
 
