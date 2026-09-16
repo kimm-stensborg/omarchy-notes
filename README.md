@@ -16,7 +16,7 @@ border and font, with Hyprland's corner rounding.
   note never lands exactly on one already there -- it steps down and to the
   right until it has a place of its own, so it can't hide inside another.
 - **Writing:** click a note to write in it, or press `Enter` on it. It
-  lifts out to the middle of its screen and is shown four times the size,
+  lifts out to the middle of its screen and is shown three times the size,
   so what you are writing is the thing in front of you rather than one card
   among many; `Esc` puts it back exactly where it was. A note too big to be
   blown up that far is enlarged as far as it fits. The note you're on wears
@@ -102,7 +102,7 @@ Your notes stay in `~/Documents/notes.json`.
 | double-click | New note at the pointer |
 | `Alt + ↑ ↓ ← →` | Go to the nearest note that way, across monitors; wraps round at the ends |
 | `↑` `↓` | Scroll the note you are on, a line at a time |
-| `PageUp` `PageDown` | Scroll it by a screenful |
+| `PageUp` `PageDown` | Jump to the top or the foot of the note |
 | `Enter` | Write in the note you are on, shown big in the middle |
 | `Alt + R` | Set or clear a reminder on the note you are on |
 | `Alt + T` | Line every note up in a grid on its own screen, and back again |

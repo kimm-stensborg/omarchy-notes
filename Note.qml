@@ -177,19 +177,31 @@ Item {
   // ---------------------------------------------------------- scrolling
 
   readonly property real lineStep: card.textSize * 1.6
-  readonly property real pageStep: Math.max(card.lineStep, body.height * 0.8)
 
   function scrollBy(dy) {
     var f = card.editing ? editFlick : readFlick
     f.contentY = Math.max(0, Math.min(Math.max(0, f.contentHeight - f.height), f.contentY + dy))
   }
 
+  // PageUp / PageDown: the top or the foot of the note in one go, rather
+  // than a screenful at a time -- on a note worth scrolling, the ends are
+  // what you are usually after. While writing, the caret goes with it,
+  // since that is where typing carries on from.
+  function jumpTo(dir) {
+    if (card.editing) {
+      editor.cursorPosition = dir < 0 ? 0 : editor.length
+      return
+    }
+    readFlick.contentY = dir < 0 ? 0 : Math.max(0, readFlick.contentHeight - readFlick.height)
+  }
+
   // The arrows, from the window that has the keyboard.
   Connections {
     target: card.overlay
-    function onScrollNote(id, steps, page) {
+    function onScrollNote(id, steps, toEnd) {
       if (id !== card.noteId || !card.primary) return
-      card.scrollBy(steps * (page ? card.pageStep : card.lineStep))
+      if (toEnd) card.jumpTo(steps)
+      else card.scrollBy(steps * card.lineStep)
     }
   }
 
@@ -469,6 +481,11 @@ Item {
               card.overlay.moveSelection(event.key === Qt.Key_Left ? "left"
                 : event.key === Qt.Key_Right ? "right"
                 : event.key === Qt.Key_Up ? "up" : "down")
+              event.accepted = true
+              return
+            }
+            if (event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown) {
+              card.jumpTo(event.key === Qt.Key_PageUp ? -1 : 1)
               event.accepted = true
               return
             }

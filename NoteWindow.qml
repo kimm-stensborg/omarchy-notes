@@ -196,10 +196,11 @@ PanelWindow {
         event.accepted = true
       } else if (!alt && !ctrl && (event.key === Qt.Key_Up || event.key === Qt.Key_Down
                  || event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown)) {
-        // Read a long note without opening it.
-        var page = event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown
+        // Read a long note without opening it: the arrows a line at a time,
+        // PageUp and PageDown to its top and its foot.
+        var toEnd = event.key === Qt.Key_PageUp || event.key === Qt.Key_PageDown
         var back = event.key === Qt.Key_Up || event.key === Qt.Key_PageUp
-        if (win.overlay.scrollSelected(back ? -1 : 1, page)) event.accepted = true
+        if (win.overlay.scrollSelected(back ? -1 : 1, toEnd)) event.accepted = true
       } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
         win.overlay.editSelected()
         event.accepted = true

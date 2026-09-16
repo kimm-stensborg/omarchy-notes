@@ -47,7 +47,7 @@ Item {
   // among many. Writing in a note does it, and so does a reminder you
   // clicked. Esc puts it back exactly where it was.
   property string zoomedId: ""
-  readonly property real zoomFactor: 4
+  readonly property real zoomFactor: 3
   // Room left around a zoomed note. The toolbar sits at the top, so the
   // clearance is the one tiling already uses for it.
   readonly property int zoomMargin: root.tileTop
@@ -234,12 +234,13 @@ Item {
   }
 
   // The arrows scroll the note you are on; the card that owns the id acts
-  // on it. steps is -1 or 1, page picks the bigger jump.
-  signal scrollNote(string id, real steps, bool page)
+  // on it. steps is -1 or 1, and toEnd goes all the way that way rather than
+  // a line at a time.
+  signal scrollNote(string id, real steps, bool toEnd)
 
-  function scrollSelected(steps, page) {
+  function scrollSelected(steps, toEnd) {
     if (!root.selectedId || !root.placements[root.selectedId]) return false
-    root.scrollNote(root.selectedId, steps, page)
+    root.scrollNote(root.selectedId, steps, toEnd)
     return true
   }
 
