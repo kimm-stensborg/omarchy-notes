@@ -109,6 +109,23 @@ test("a new note is a portrait card, four across to five down", () => {
   assert.strictEqual(p.a.h, M.DEFAULT_H)
 })
 
+test("a 1440p screen tiles three rows of new notes, clear of the bottom", () => {
+  // the board's own numbers: room at the top for the bar and the toolbar,
+  // and Hyprland's gaps_out halved and doubled back for the grid gap
+  const TOP = 96, GAP = 10
+  const notes = []
+  for (let i = 0; i < 21; i++)
+    notes.push(note("n" + i, DP5, 0.1, 0.1, { w: M.DEFAULT_W, h: M.DEFAULT_H }))
+  const t = M.tileNotes(notes, [DP5], DP5.key, { gap: GAP, top: TOP })
+  const rows = [...new Set(Object.keys(t).map(k => t[k].ly))].sort((a, b) => a - b)
+  assert.strictEqual(rows.length, 3)
+  // the third row sits where the grid puts it, not squashed up by the clamp
+  // that keeps a tail on screen -- which is what running out of room looks like
+  assert.strictEqual(rows[2], TOP + GAP + 2 * (M.DEFAULT_H + GAP))
+  for (const id in t)
+    assert.ok(t[id].ly + t[id].h <= DP5.height, id + " runs off the bottom")
+})
+
 test("placeNotes: home present lands on its own screen", () => {
   const p = M.placeNotes([note("a", DP5, 0.5, 0.5)], [DP7, DP5, EDP], DP7.key)
   assert.strictEqual(p.a.screenName, "DP-5")

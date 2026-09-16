@@ -6,9 +6,10 @@
 // covers it.
 
 var VERSION = 1
-// A note stands as a portrait card, four across to five down.
-var DEFAULT_W = 400
-var DEFAULT_H = 500
+// A note stands as a portrait card, four across to five down, and small
+// enough that a 1440p screen tiles three rows of them with room to spare.
+var DEFAULT_W = 320
+var DEFAULT_H = 400
 var MIN_W = 140
 var MIN_H = 100
 var MAX_W = 1600
