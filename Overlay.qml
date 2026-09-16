@@ -47,7 +47,7 @@ Item {
   // among many. Writing in a note does it, and so does a reminder you
   // clicked. Esc puts it back exactly where it was.
   property string zoomedId: ""
-  readonly property real zoomFactor: 3
+  readonly property real zoomFactor: 2
   // Room left around a zoomed note. The toolbar sits at the top, so the
   // clearance is the one tiling already uses for it.
   readonly property int zoomMargin: root.tileTop

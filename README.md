@@ -16,7 +16,7 @@ border and font, with Hyprland's corner rounding.
   note never lands exactly on one already there -- it steps down and to the
   right until it has a place of its own, so it can't hide inside another.
 - **Writing:** click a note to write in it, or press `Enter` on it. It
-  lifts out to the middle of its screen and is shown three times the size,
+  lifts out to the middle of its screen and is shown at twice the size,
   so what you are writing is the thing in front of you rather than one card
   among many; `Esc` puts it back exactly where it was. A note too big to be
   blown up that far is enlarged as far as it fits. The note you're on wears

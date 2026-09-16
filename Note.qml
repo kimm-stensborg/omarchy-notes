@@ -94,10 +94,19 @@ Item {
   // it, so they sit in the padding rather than over the last line of text.
   readonly property int padX: Style.spacing.xxxl
   readonly property int padY: Style.spacing.xxl
-  // Reserved whether a label is showing or not, so setting a reminder never
-  // reflows the text; the gap keeps the label off the line above it, which
-  // a scrolling note cuts through wherever it happens to fall.
-  readonly property int footerHeight: Math.round(Style.font.caption * 1.5) + Style.spacing.lg
+  // Only taken when there is something down there to make room for -- a
+  // reminder, or the monitor a borrowed note is away from. A note with
+  // neither keeps the whole card for its text. The gap in it holds the
+  // label off the line above, which a scrolling note cuts through wherever
+  // it happens to fall.
+  readonly property bool hasFooter: card.remindText !== ""
+    || (!!card.placement && card.placement.away)
+  readonly property int footerTarget: card.hasFooter
+    ? Math.round(Style.font.caption * 1.5) + Style.spacing.lg : 0
+  // Setting or clearing a reminder gives the text back its room gently
+  // rather than snapping it.
+  property int footerHeight: card.footerTarget
+  Behavior on footerHeight { NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
 
   // The dragged copy must stay visible even off its own screen, or it would
   // lose the pointer grab.
