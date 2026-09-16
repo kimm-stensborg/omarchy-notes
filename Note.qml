@@ -50,6 +50,14 @@ Item {
   readonly property bool selected: !!card.overlay && card.overlay.selectedId === card.noteId && card.primary
   readonly property bool confirming: !!card.overlay && card.overlay.confirmingId === card.noteId && card.primary
   readonly property bool reminding: !!card.overlay && card.overlay.remindingId === card.noteId && card.primary
+  // Shown on its own: out in the middle of its screen and blown up. The card
+  // keeps its own size and is scaled, so everything on it -- the text, the
+  // border, the padding -- grows together, which is what a zoom is.
+  readonly property bool zoomed: !!card.overlay && card.overlay.zoomedId === card.noteId && card.primary
+  readonly property real zoomScale: card.zoomed && card.placement && card.host && card.host.info
+    ? Model.zoomFit(card.placement.w, card.placement.h, card.host.info,
+                    card.overlay.zoomFactor, card.overlay.zoomMargin)
+    : 1
   readonly property bool focused: card.editing || card.dragging || card.selected || card.confirming || card.reminding
 
   // The time this note is to come back to you, and how that reads now.
@@ -93,10 +101,14 @@ Item {
 
   // The dragged copy must stay visible even off its own screen, or it would
   // lose the pointer grab.
-  visible: !!card.note && (card.overlapsScreen || card.isSource)
+  visible: !!card.note && (card.overlapsScreen || card.isSource || card.zoomed)
   enabled: card.primary
-  x: card.gx - card.sx
-  y: card.gy - card.sy
+  // Zoomed, it sits in the middle of its own screen; scaling about the
+  // centre then grows it evenly in every direction from there.
+  x: card.zoomed && card.host.info ? (card.host.info.width - card.width) / 2 : card.gx - card.sx
+  y: card.zoomed && card.host.info ? (card.host.info.height - card.height) / 2 : card.gy - card.sy
+  transformOrigin: Item.Center
+  scale: card.zoomScale
   width: card.placement ? card.placement.w : 0
   height: card.placement ? card.placement.h : 0
   // Stacking. Notes keep the order they were last clicked into, but the one
@@ -112,9 +124,14 @@ Item {
   Behavior on y { enabled: !card.dragging; NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
   Behavior on width { enabled: !card.dragging; NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
   Behavior on height { enabled: !card.dragging; NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
+  // Lifting out and settling back happen together with the move, so the note
+  // travels to the middle as it grows rather than jumping there first.
+  Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutQuint } }
 
   function activate() {
     card.overlay.activeScreen = card.host.screenName
+    // Reaching for another note puts back the one that was shown on its own.
+    if (card.overlay.zoomedId !== card.noteId) card.overlay.unzoom()
     card.overlay.selectedId = card.noteId
     card.store.raise(card.noteId)
   }
@@ -122,6 +139,7 @@ Item {
   function startEdit() {
     if (!card.note) return
     card.activate()
+    card.overlay.zoomedId = card.noteId
     card.overlay.editingId = card.noteId
   }
 
@@ -147,8 +165,10 @@ Item {
     card.host.focusBoard()
   }
 
+  // Esc: the note goes back to the size and the place it came from.
   function stopEdit() {
     if (card.overlay.editingId === card.noteId) card.overlay.editingId = ""
+    if (card.overlay.zoomedId === card.noteId) card.overlay.unzoom()
     card.host.focusBoard()
   }
 
@@ -269,8 +289,11 @@ Item {
             var g = globalAt(mouse)
             grab.pressGX = g.x
             grab.pressGY = g.y
-            grab.armed = true
-            if (mouse.modifiers & Qt.MetaModifier)
+            // A note shown on its own is not standing where it lives, so a
+            // drag there would write the middle of the screen down as its
+            // home. It still takes a click, which opens it for writing.
+            grab.armed = !card.zoomed
+            if (grab.armed && (mouse.modifiers & Qt.MetaModifier))
               card.overlay.beginDrag(card.noteId, card.host.screenName, g.x, g.y)
           }
 

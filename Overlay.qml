@@ -42,6 +42,15 @@ Item {
   property string confirmingId: ""
   // The note whose reminder is being set.
   property string remindingId: ""
+  // The note shown on its own: lifted out to the middle of its screen and
+  // blown up, so it is the thing you are looking at rather than one card
+  // among many. Writing in a note does it, and so does a reminder you
+  // clicked. Esc puts it back exactly where it was.
+  property string zoomedId: ""
+  readonly property real zoomFactor: 4
+  // Room left around a zoomed note. The toolbar sits at the top, so the
+  // clearance is the one tiling already uses for it.
+  readonly property int zoomMargin: root.tileTop
   // Ticks while the board is up, so the reminder a note shows counts down
   // instead of going stale under you.
   property double now: Date.now()
@@ -122,6 +131,7 @@ Item {
     root.selectedId = ""
     root.confirmingId = ""
     root.remindingId = ""
+    root.zoomedId = ""
     root.now = Date.now()
     if (root.store) root.store.refreshMonitors()
     root.opened = true
@@ -133,9 +143,12 @@ Item {
     if (wanted) Qt.callLater(function() { root.focusNote(wanted) })
   }
 
+  // A reminder you clicked shows the note the way writing in one does:
+  // out in the middle of its own screen, big enough to read across the room.
   function focusNote(id) {
     if (!root.store || !root.store.get(id)) return
     root.select(id)
+    root.zoomedId = id
   }
 
   function close() {
@@ -145,6 +158,7 @@ Item {
     root.selectedId = ""
     root.confirmingId = ""
     root.remindingId = ""
+    root.zoomedId = ""
   }
 
   function dismiss() {
@@ -199,6 +213,8 @@ Item {
 
   function select(id) {
     if (!id) return
+    // Moving to another note puts the one you were on back where it lives.
+    if (id !== root.zoomedId) root.zoomedId = ""
     root.selectedId = id
     var p = root.placements[id]
     if (p) root.activeScreen = p.screenName
@@ -233,6 +249,7 @@ Item {
     // Arrowing past a note only lifts it while you are on it; writing in
     // one is a commitment, and leaves it on top of the pile as a click does.
     if (root.store) root.store.raise(root.selectedId)
+    root.zoomedId = root.selectedId
     root.editingId = root.selectedId
   }
 
@@ -277,6 +294,10 @@ Item {
   }
 
   function cancelRemind() { root.remindingId = "" }
+
+  // ------------------------------------------------------------------ zoom
+
+  function unzoom() { root.zoomedId = "" }
 
   // -------------------------------------------------------------- dragging
 

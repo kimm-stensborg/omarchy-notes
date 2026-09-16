@@ -146,6 +146,7 @@ PanelWindow {
           text: {
             if (win.store && win.store.lastDeleted) return "Deleted  ·  Ctrl+Z to undo"
             if (win.overlay.tiled) return "Alt+T to let them flow back"
+            if (win.overlay.zoomedId !== "") return "Esc to put it back"
             return "N add  ·  Alt+R remind  ·  Alt+T tile  ·  Del delete  ·  Esc close"
           }
           color: Util.alpha(Color.foreground, 0.6)
@@ -203,7 +204,9 @@ PanelWindow {
         win.overlay.editSelected()
         event.accepted = true
       } else if (event.key === Qt.Key_Escape) {
-        win.overlay.dismiss()
+        // A note shown on its own goes back first; Esc again hides the board.
+        if (win.overlay.zoomedId !== "") win.overlay.unzoom()
+        else win.overlay.dismiss()
         event.accepted = true
       } else if (event.key === Qt.Key_N) {
         win.overlay.createOn(win.screenName)

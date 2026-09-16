@@ -408,6 +408,29 @@ test("reminderNotification names the kind, then the time and the note", () => {
   assert.ok(M.reminderNotification("x".repeat(200), at).body.length <= 80)
 })
 
+test("zoomFit blows a note up as far as it fits, and no further", () => {
+  // a default note on a big screen gets the whole factor
+  assert.strictEqual(M.zoomFit(390, 300, DP5, 4, 96), 4)
+  // a tall one is held back by the height, toolbar clearance included
+  assert.strictEqual(M.zoomFit(390, 400, DP5, 4, 96), (1440 - 192) / 400)
+  // and a wide one by the width
+  assert.strictEqual(M.zoomFit(900, 300, DP5, 4, 96), (2560 - 192) / 900)
+  // a note already bigger than the room left is never shrunk
+  assert.strictEqual(M.zoomFit(2600, 1500, DP5, 4, 96), 1)
+  // nonsense in, no zoom out
+  assert.strictEqual(M.zoomFit(0, 300, DP5, 4, 96), 1)
+  assert.strictEqual(M.zoomFit(390, 300, null, 4, 96), 1)
+  // whatever it returns, the note fits the room left for it
+  for (const [w, h] of [[390, 300], [390, 400], [900, 300], [140, 100], [1600, 1200]]) {
+    const f = M.zoomFit(w, h, DP5, 4, 96)
+    assert.ok(f >= 1, "never shrinks")
+    if (f > 1) {
+      assert.ok(w * f <= DP5.width - 192 + 1e-9, "fits across: " + w)
+      assert.ok(h * f <= DP5.height - 192 + 1e-9, "fits down: " + h)
+    }
+  }
+})
+
 test("nearestTo picks the note closest to a point", () => {
   const p = { a: { gx: 0, gy: 0, w: 100, h: 100 }, b: { gx: 1000, gy: 0, w: 100, h: 100 } }
   assert.strictEqual(M.nearestTo(p, 40, 40), "a")

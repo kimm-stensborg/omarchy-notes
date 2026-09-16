@@ -15,9 +15,13 @@ border and font, with Hyprland's corner rounding.
 - **New notes:** "+ New note", `N`, or a double-click on empty space. A new
   note never lands exactly on one already there -- it steps down and to the
   right until it has a place of its own, so it can't hide inside another.
-- **Writing:** click a note to write in it. The note you're on wears the
-  active window border and comes to the front of the pile, so a note under
-  another is never read through it.
+- **Writing:** click a note to write in it, or press `Enter` on it. It
+  lifts out to the middle of its screen and is shown four times the size,
+  so what you are writing is the thing in front of you rather than one card
+  among many; `Esc` puts it back exactly where it was. A note too big to be
+  blown up that far is enlarged as far as it fits. The note you're on wears
+  the active window border and comes to the front of the pile, so a note
+  under another is never read through it.
 - **Moving:** notes have no title bar -- drag the note itself, anywhere on
   it, including from one monitor to another. `SUPER` + drag works too, as
   Hyprland moves windows, where the compositor lets it through.
@@ -31,7 +35,9 @@ border and font, with Hyprland's corner rounding.
 - **Reminders:** `Alt+R` sets a time on the note you're on -- a preset, or
   type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. When it comes
   up you get a notification, and clicking it opens the board with that note
-  selected. The note shows its reminder in the corner until then. Reminders
+  shown the same way -- out in the middle, big enough to read across the
+  room -- so the reminder lands on the note itself and not on a board you
+  then have to search. The note shows its reminder in the corner until then. Reminders
   ring whether the board is up or not, and one that fell due while the shell
   was down rings when it comes back. They are one-shot: ringing clears them,
   and so does `Alt+R` then "Clear".
@@ -97,13 +103,13 @@ Your notes stay in `~/Documents/notes.json`.
 | `Alt + ↑ ↓ ← →` | Go to the nearest note that way, across monitors; wraps round at the ends |
 | `↑` `↓` | Scroll the note you are on, a line at a time |
 | `PageUp` `PageDown` | Scroll it by a screenful |
-| `Enter` | Write in the note you are on |
+| `Enter` | Write in the note you are on, shown big in the middle |
 | `Alt + R` | Set or clear a reminder on the note you are on |
 | `Alt + T` | Line every note up in a grid on its own screen, and back again |
 | `Del` | Delete the note you are on, after a yes or no |
 | drag | Move a note, anywhere on it, across monitors |
 | right-click | Delete that note, after a yes or no |
-| `Esc` | Stop editing, then hide the board |
+| `Esc` | Put a note that is shown on its own back where it lives, then hide the board |
 | `Ctrl + Z` | Restore the last deleted note |
 
 The note you are on wears the active window border, so you can see where the

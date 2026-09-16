@@ -324,6 +324,17 @@ function spawnLocal(s) {
   return { lx: (s.width - DEFAULT_W) / 2, ly: s.height * 0.25 }
 }
 
+// ------------------------------------------------------------------- zoom
+
+// How far a note can be blown up on a screen and still fit: never more than
+// `factor`, never smaller than it already is, and never so big that it
+// covers the toolbar -- which is what `margin` keeps clear at the top.
+function zoomFit(w, h, s, factor, margin) {
+  if (!s || !(w > 0) || !(h > 0)) return 1
+  var room = Math.min((s.width - 2 * margin) / w, (s.height - 2 * margin) / h)
+  return Math.max(1, Math.min(factor, room))
+}
+
 // ---------------------------------------------------------------- markdown
 
 // A deliberately small dialect: headings, bullets, checkboxes, and inline
