@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.kimm-stensborg.notes",
+  "name": "Notes",
+  "version": "1.0.0",
+  "author": "Kimm Stensborg",
+  "license": "MIT",
+  "description": "Notes on a transparent board across all your monitors, summoned with SUPER + N",
+  "kinds": ["service", "overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Store.qml",
+    "overlay": "Overlay.qml"
+  }
+}
