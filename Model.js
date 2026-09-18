@@ -120,6 +120,33 @@ function parseFile(text) {
   return { ok: true, notes: notes, view: sanitizeView(data && data.view), error: "" }
 }
 
+// The file changed under us while the board had changes of its own still to
+// write -- notes.json edited by hand a moment after typing on the board. Both
+// are kept: the file's copy of every note, except the ones the board touched
+// since it last wrote, which are the board's. A note deleted on the board
+// stays deleted, a note made on the board is added, and a note the board
+// changed wins over the same note changed in the file.
+//   theirs: the notes just read; ours: the notes in hand
+//   changed: { <id>: true } for every note the board has touched unwritten
+function mergeNotes(theirs, ours, changed) {
+  theirs = theirs || []
+  ours = ours || []
+  changed = changed || {}
+  var mine = {}
+  for (var i = 0; i < ours.length; i++) mine[ours[i].id] = ours[i]
+  var out = [], placed = {}
+  for (var j = 0; j < theirs.length; j++) {
+    var id = theirs[j].id
+    if (!changed[id]) out.push(theirs[j])
+    else if (mine[id]) out.push(mine[id])
+    else continue
+    placed[id] = true
+  }
+  for (var k = 0; k < ours.length; k++)
+    if (changed[ours[k].id] && !placed[ours[k].id]) out.push(ours[k])
+  return out
+}
+
 function serialize(notes, view) {
   return JSON.stringify({ version: VERSION, view: sanitizeView(view), notes: notes || [] }, null, 2) + "\n"
 }

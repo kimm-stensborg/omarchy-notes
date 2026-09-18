@@ -164,7 +164,12 @@ note's own text can never become a command.
 Each note records its monitor and its position as a fraction of that screen,
 so notes keep their place when the resolution or scale changes. If the file
 can't be read, it is kept as `notes.json.corrupt-<time>` and never
-overwritten.
+overwritten, and the board holds on to the notes it already had -- a typo in
+a hand edit never empties it. Your next change on the board writes those
+notes back; fixing the file by hand works too. A hand edit that lands while
+the board still has a change of its own to write is merged with it rather
+than lost: the notes you touched on the board are the board's, the rest are
+the file's.
 
 ## Tests
 

@@ -441,5 +441,145 @@ test("nearestOther hands the board to the note nearest the one deleted", () => {
   assert.strictEqual(M.nearestOther(p, "never-was"), null)
 })
 
+// ------------------------------------------------------------- reminders
+// Local time, as the reminder field reads it: 14:00 on a Friday afternoon.
+const MIN = 60000, HOUR = 3600000, DAY = 86400000
+const at = (days, hh, mm) => new Date(2026, 8, 18 + days, hh, mm).getTime()
+const NOW = at(0, 14, 0)
+// Model.js runs in its own context, whose arrays are not this one's.
+const plain = v => JSON.parse(JSON.stringify(v))
+
+test("parseWhen reads durations, a bare number as minutes", () => {
+  assert.strictEqual(M.parseWhen("45", NOW), NOW + 45 * MIN)
+  assert.strictEqual(M.parseWhen("45m", NOW), NOW + 45 * MIN)
+  assert.strictEqual(M.parseWhen("90 mins", NOW), NOW + 90 * MIN)
+  assert.strictEqual(M.parseWhen("2h", NOW), NOW + 2 * HOUR)
+  assert.strictEqual(M.parseWhen("1.5h", NOW), NOW + 90 * MIN)
+  assert.strictEqual(M.parseWhen("1h30", NOW), NOW + 90 * MIN)
+  assert.strictEqual(M.parseWhen("1h 30m", NOW), NOW + 90 * MIN)
+  assert.strictEqual(M.parseWhen("3d", NOW), NOW + 3 * DAY)
+  assert.strictEqual(M.parseWhen("2 hours", NOW), NOW + 2 * HOUR)
+  assert.strictEqual(M.parseWhen("  In 2H ", NOW), NOW + 2 * HOUR)
+})
+
+test("parseWhen reads a clock time as today while it is still to come", () => {
+  assert.strictEqual(M.parseWhen("15:30", NOW), at(0, 15, 30))
+  assert.strictEqual(M.parseWhen("14.30", NOW), at(0, 14, 30))
+  assert.strictEqual(M.parseWhen("at 23:59", NOW), at(0, 23, 59))
+  // Gone by, or this very minute: the same time tomorrow.
+  assert.strictEqual(M.parseWhen("9:00", NOW), at(1, 9, 0))
+  assert.strictEqual(M.parseWhen("14:00", NOW), at(1, 14, 0))
+  assert.strictEqual(M.parseWhen("0:00", NOW), at(1, 0, 0))
+})
+
+test("parseWhen reads tomorrow, nine in the morning unless told", () => {
+  assert.strictEqual(M.parseWhen("tomorrow", NOW), at(1, 9, 0))
+  assert.strictEqual(M.parseWhen("tomorrow 8:30", NOW), at(1, 8, 30))
+  assert.strictEqual(M.parseWhen("tomorrow at 17", NOW), at(1, 17, 0))
+  // Across the end of a month.
+  const lastOfMonth = new Date(2026, 8, 30, 22, 0).getTime()
+  assert.strictEqual(M.parseWhen("tomorrow", lastOfMonth), new Date(2026, 9, 1, 9, 0).getTime())
+})
+
+test("parseWhen says nothing to what it does not understand", () => {
+  for (const t of ["", "   ", "soon", "0", "0m", "-5", "25:00", "9:60", "tomorrow 24", "tomorrow 8:75", "2x", "h"])
+    assert.strictEqual(M.parseWhen(t, NOW), 0, JSON.stringify(t))
+})
+
+test("remindLabel counts down close at hand, and names the time further off", () => {
+  assert.strictEqual(M.remindLabel(0, NOW), "")
+  assert.strictEqual(M.remindLabel(NOW, NOW), "due")
+  assert.strictEqual(M.remindLabel(NOW - HOUR, NOW), "due")
+  assert.strictEqual(M.remindLabel(NOW + 20 * 1000, NOW), "in 1m")
+  assert.strictEqual(M.remindLabel(NOW + 30 * MIN, NOW), "in 30m")
+  assert.strictEqual(M.remindLabel(at(0, 20, 5), NOW), "at 20:05")
+  assert.strictEqual(M.remindLabel(at(1, 8, 30), NOW), "tomorrow 8:30")
+  assert.strictEqual(M.remindLabel(NOW + 3 * DAY, NOW), "in 3d")
+})
+
+test("dueNotes gives what has come, soonest first; nextRemind the next to come", () => {
+  const iso = ms => new Date(ms).toISOString()
+  const notes = [
+    { id: "later", remind: iso(NOW + HOUR) },
+    { id: "late", remind: iso(NOW - MIN) },
+    { id: "none", remind: "" },
+    { id: "now", remind: iso(NOW) },
+    { id: "soon", remind: iso(NOW + MIN) },
+    { id: "junk", remind: "not a time" },
+    { id: "long-late", remind: iso(NOW - DAY) }
+  ]
+  assert.deepStrictEqual(plain(M.dueNotes(notes, NOW).map(n => n.id)), ["long-late", "late", "now"])
+  assert.strictEqual(M.nextRemind(notes, NOW), NOW + MIN)
+  assert.strictEqual(M.nextRemind([{ id: "x", remind: "" }], NOW), 0)
+  assert.deepStrictEqual(plain(M.dueNotes([], NOW)), [])
+  assert.deepStrictEqual(plain(M.dueNotes(null, NOW)), [])
+})
+
+test("parseFile keeps a reminder only when it is a time", () => {
+  const r = M.parseFile(JSON.stringify({ notes: [
+    { id: "a", remind: "2026-09-18T12:00:00.000Z" }, { id: "b", remind: "tuesday-ish" }, { id: "c" }] }))
+  assert.strictEqual(r.notes[0].remind, "2026-09-18T12:00:00.000Z")
+  assert.strictEqual(r.notes[1].remind, "")
+  assert.strictEqual(r.notes[2].remind, "")
+})
+
+test("firstLine is the first line with words on it, marks off, box or bullet kept", () => {
+  assert.strictEqual(M.firstLine("\n\n  \n**Buy** milk\nand bread"), "Buy milk")
+  assert.strictEqual(M.firstLine("# Shopping"), "Shopping")
+  assert.strictEqual(M.firstLine("- [ ] call ~~Bob~~ Alice"), "☐ call Bob Alice")
+  assert.strictEqual(M.firstLine("[x] done"), "✓ done")
+  assert.strictEqual(M.firstLine("- `eggs`"), "• eggs")
+  assert.strictEqual(M.firstLine("**\n\n"), "")
+  assert.strictEqual(M.firstLine(""), "")
+})
+
+test("reminderNotification: a fixed headline, the clock, then the note's first line", () => {
+  const due = at(0, 9, 5)
+  const r = M.reminderNotification("Call the dentist\nabout Tuesday", due)
+  assert.strictEqual(r.title, "Note reminder")
+  assert.strictEqual(r.body, "9:05  ·  Call the dentist")
+  assert.strictEqual(M.reminderNotification("", due).body, "9:05  ·  Note")
+  const long = M.reminderNotification("x".repeat(80), due).body
+  assert.strictEqual(long, "9:05  ·  " + "x".repeat(49) + "…")
+})
+
+test("reminderNotification never lets a note's text pass for a flag", () => {
+  for (const text of ["--exec rm -rf ~", "-u low", "--app-name x"]) {
+    const r = M.reminderNotification(text, NOW)
+    assert.ok(!r.title.startsWith("-") && !r.body.startsWith("-"), text)
+  }
+})
+
+test("zoomFit blows a note up by the factor, or as far as it fits, never shrinking it", () => {
+  const s = { width: 2560, height: 1440 }
+  assert.strictEqual(M.zoomFit(320, 400, s, 2, 96), 2)
+  assert.strictEqual(M.zoomFit(320, 800, s, 2, 96), (1440 - 192) / 800)
+  assert.strictEqual(M.zoomFit(2000, 1400, s, 2, 96), 1)
+  assert.strictEqual(M.zoomFit(0, 400, s, 2, 96), 1)
+  assert.strictEqual(M.zoomFit(320, 400, null, 2, 96), 1)
+})
+
+// ------------------------------------------------------ edits from outside
+
+test("mergeNotes keeps the file's notes and the board's unwritten changes", () => {
+  const file = [{ id: "a", text: "a by hand" }, { id: "b", text: "b by hand" }, { id: "new-in-file", text: "x" }]
+  const board = [{ id: "a", text: "a typed" }, { id: "b", text: "b" }, { id: "made-here", text: "y" }]
+  const m = M.mergeNotes(file, board, { a: true, "made-here": true })
+  assert.deepStrictEqual(plain(m.map(n => [n.id, n.text])), [
+    ["a", "a typed"], ["b", "b by hand"], ["new-in-file", "x"], ["made-here", "y"]])
+})
+
+test("mergeNotes: deleted on the board stays deleted, deleted by hand stays gone", () => {
+  const file = [{ id: "a" }, { id: "gone-here" }]
+  const board = [{ id: "gone-there" }, { id: "a" }]
+  assert.deepStrictEqual(plain(M.mergeNotes(file, board, { "gone-here": true }).map(n => n.id)), ["a"])
+})
+
+test("mergeNotes: nothing changed on the board is the file as read", () => {
+  const file = [{ id: "a", text: "1" }]
+  assert.deepStrictEqual(plain(M.mergeNotes(file, [{ id: "a", text: "0" }], {})), file)
+  assert.deepStrictEqual(plain(M.mergeNotes([], [{ id: "a" }], {})), [])
+})
+
 if (failed) { console.log(failed + " failed"); process.exit(1) }
 console.log("all passed")

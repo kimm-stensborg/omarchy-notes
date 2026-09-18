@@ -39,6 +39,14 @@ Item {
   property bool tiled: false
   // The note just created, so its card opens ready to type in.
   property string pendingEditId: ""
+  // What the board has changed and not yet written: the ids of the notes it
+  // touched, and whether it changed the view. A hand edit that lands before
+  // the write is merged with these rather than lost -- see ingest.
+  property var changed: ({})
+  property bool viewChanged: false
+  // A copy of an unreadable file is being made. Nothing is written until it
+  // is safely aside, so the file you broke is never lost to our own save.
+  property bool backingUp: false
 
   // connector -> { name, key, label }, from `hyprctl monitors -j`.
   property var monitors: ({})
@@ -60,7 +68,8 @@ Item {
 
   // ----------------------------------------------------------------- writes
 
-  function commit(next, idsChanged) {
+  function commit(next, idsChanged, id) {
+    root.changed[id] = true
     root.notes = next
     if (idsChanged) root.ids = next.map(function(n) { return n.id })
     saveTimer.restart()
@@ -79,7 +88,7 @@ Item {
       created: now, updated: now
     }, 0)
     root.pendingEditId = note.id
-    root.commit(root.notes.concat([note]), true)
+    root.commit(root.notes.concat([note]), true, note.id)
     return note.id
   }
 
@@ -91,7 +100,7 @@ Item {
       var note = Object.assign({}, next[i], patch)
       if (touch !== false) note.updated = new Date().toISOString()
       next[i] = note
-      root.commit(next, false)
+      root.commit(next, false, id)
       return
     }
   }
@@ -100,14 +109,15 @@ Item {
     var note = root.get(id)
     if (!note) return
     root.lastDeleted = note
-    root.commit(root.notes.filter(function(n) { return n.id !== id }), true)
+    root.commit(root.notes.filter(function(n) { return n.id !== id }), true, id)
   }
 
   function restore() {
     var note = root.lastDeleted
     root.lastDeleted = null
     if (!note || root.get(note.id)) return
-    root.commit(root.notes.concat([Object.assign({}, note, { z: Model.maxZ(root.notes) + 1 })]), true)
+    root.commit(root.notes.concat([Object.assign({}, note, { z: Model.maxZ(root.notes) + 1 })]), true, note.id)
+    root.armReminders()
   }
 
   function raise(id) {
@@ -123,6 +133,7 @@ Item {
     on = !!on
     if (root.tiled === on) return
     root.tiled = on
+    root.viewChanged = true
     saveTimer.restart()
   }
 
@@ -190,32 +201,56 @@ Item {
 
   function save() {
     if (!root.loaded) return
+    // Waits for the copy of a broken file, then writes.
+    if (root.backingUp) { saveTimer.restart(); return }
     var text = Model.serialize(root.notes, { tiled: root.tiled })
     root.lastWritten = text
+    root.changed = ({})
+    root.viewChanged = false
     notesFile.setText(text)
+  }
+
+  function hasUnsaved() {
+    return root.viewChanged || Object.keys(root.changed).length > 0
   }
 
   function ingest(text) {
     // Our own write coming back through the watch.
     if (root.loaded && text === root.lastWritten) return
-    // An edit is waiting to be written; it is newer than the file.
-    if (root.loaded && saveTimer.running) return
     var result = Model.parseFile(text)
     if (!result.ok) {
-      // Keep the unreadable file aside rather than write over it, then
-      // carry on with an empty board.
+      // Keep the unreadable file aside rather than write over it. The notes
+      // in hand stay as they are: on the first read that is an empty board,
+      // and after it they are the last good copy -- a typo in a hand edit,
+      // or an editor caught halfway through writing, must not empty the
+      // board, let alone have that empty board saved over your notes.
       root.loadError = result.error
-      console.warn("notes: " + root.notesPath + " is not valid (" + result.error + "); keeping a copy and starting empty")
-      backupProc.command = ["cp", "--", root.notesPath, root.notesPath + ".corrupt-" + Date.now()]
-      backupProc.running = true
-      root.replaceAll([])
+      console.warn("notes: " + root.notesPath + " is not valid (" + result.error + "); keeping a copy and the notes in hand")
+      root.backUpBadFile()
       return
     }
     root.loadError = ""
-    root.replaceAll(result.notes)
-    root.tiled = result.view.tiled
+    if (root.hasUnsaved()) {
+      // Changed by hand while the board still had changes to write: keep
+      // both, and write the two together.
+      root.replaceAll(Model.mergeNotes(result.notes, root.notes, root.changed))
+      if (!root.viewChanged) root.tiled = result.view.tiled
+      saveTimer.restart()
+    } else {
+      root.replaceAll(result.notes)
+      root.tiled = result.view.tiled
+    }
     root.loaded = true
     root.armReminders()
+  }
+
+  // One copy at a time: a file saved broken again while the first copy is
+  // still being made is the same mistake.
+  function backUpBadFile() {
+    if (backupProc.running) return
+    root.backingUp = true
+    backupProc.command = ["cp", "--", root.notesPath, root.notesPath + ".corrupt-" + Date.now()]
+    backupProc.running = true
   }
 
   function replaceAll(list) {
@@ -244,7 +279,10 @@ Item {
 
   Process {
     id: backupProc
-    onExited: root.loaded = true
+    onExited: {
+      root.backingUp = false
+      root.loaded = true
+    }
   }
 
   // --------------------------------------------------------------- monitors
