@@ -65,14 +65,15 @@ PanelWindow {
     if (o.editingId !== "" && o.textSelected)
       return [["Ctrl + B", "bold"], ["Ctrl + I", "italic"], ["Ctrl + U", "underline"],
               ["Ctrl + D", "strike"], ["Ctrl + E", "code"], ["Ctrl + 1", "heading"],
-              ["Ctrl + L", "bullet"], ["Ctrl + K", "task"]]
+              ["Ctrl + L", "bullet"], ["Ctrl + N", "numbered"], ["Ctrl + K", "task"]]
     if (o.editingId !== "")
       return [["Alt + Enter", "put it back"], ["Ctrl + B", "bold"], ["Alt + R", "remind"],
               ["Alt + Del", "delete"]]
     if (o.zoomedId !== "")
       return [["Alt + Enter", "put it back"], ["Enter", "write"], ["Alt + R", "remind"],
               ["Alt + Del", "delete"]]
-    var undo = win.store && win.store.lastDeleted ? [["Ctrl + Z", "undo the delete"]] : []
+    var gone = win.store ? win.store.deletedCount : 0
+    var undo = gone > 0 ? [["Ctrl + Z", gone > 1 ? "undo delete · " + gone : "undo the delete"]] : []
     if (o.selectedId !== "" && o.placements[o.selectedId])
       return undo.concat([["Enter", "open it"], ["Alt + ← →", "next note"], ["Alt + R", "remind"],
                           ["Del", "delete"], ["Alt + T", o.tiled ? "let them flow" : "tile"]])
@@ -291,8 +292,16 @@ PanelWindow {
       var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
       var alt = (event.modifiers & Qt.AltModifier) !== 0
 
-      // A pending delete takes the keyboard until it is answered.
+      // A pending delete takes the keyboard until it is answered. Shift or
+      // Alt going down on its own is a hand on its way to a key, not an
+      // answer.
       if (win.overlay.confirmingId !== "") {
+        if (event.key === Qt.Key_Shift || event.key === Qt.Key_Control || event.key === Qt.Key_Alt
+            || event.key === Qt.Key_AltGr || event.key === Qt.Key_Meta || event.key === Qt.Key_Super_L
+            || event.key === Qt.Key_Super_R || event.key === Qt.Key_CapsLock) {
+          event.accepted = true
+          return
+        }
         if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Y
             || event.key === Qt.Key_Delete) win.overlay.confirmDelete()
         else win.overlay.cancelDelete()
@@ -344,7 +353,9 @@ PanelWindow {
         win.overlay.createOn(win.screenName)
         event.accepted = true
       } else if (ctrl && event.key === Qt.Key_Z) {
-        if (win.store) win.store.restore()
+        // The note comes back in hand, so you can see where it went.
+        var back = win.store ? win.store.restore() : ""
+        if (back) Qt.callLater(function() { win.overlay.select(back) })
         event.accepted = true
       }
     }

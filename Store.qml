@@ -32,7 +32,10 @@ Item {
   property bool loaded: false
   property string loadError: ""
   property string lastWritten: ""
-  property var lastDeleted: null
+  // The notes deleted since the shell started, newest last, for Ctrl+Z to
+  // bring back one at a time.
+  property var deleted: []
+  readonly property int deletedCount: root.deleted.length
   // How the board is being looked at rather than what is on it: kept in the
   // same file, so the grid outlives hiding the board and restarting the
   // shell, and only a toggle (or moving a note by hand) puts it back.
@@ -108,16 +111,20 @@ Item {
   function remove(id) {
     var note = root.get(id)
     if (!note) return
-    root.lastDeleted = note
+    root.deleted = Model.pushDeleted(root.deleted, note)
     root.commit(root.notes.filter(function(n) { return n.id !== id }), true, id)
   }
 
+  // Brings back the newest deleted note and returns its id, or "" when there
+  // is nothing left to bring back.
   function restore() {
-    var note = root.lastDeleted
-    root.lastDeleted = null
-    if (!note || root.get(note.id)) return
+    var r = Model.popDeleted(root.deleted, root.notes)
+    root.deleted = r.stack
+    var note = r.note
+    if (!note) return ""
     root.commit(root.notes.concat([Object.assign({}, note, { z: Model.maxZ(root.notes) + 1 })]), true, note.id)
     root.armReminders()
+    return note.id
   }
 
   function raise(id) {

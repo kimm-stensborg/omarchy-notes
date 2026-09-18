@@ -581,5 +581,127 @@ test("mergeNotes: nothing changed on the board is the file as read", () => {
   assert.deepStrictEqual(plain(M.mergeNotes([], [{ id: "a" }], {})), [])
 })
 
+// ----------------------------------------------------------------- links
+
+test("inlineMarkup turns web addresses into links, and the marks still work", () => {
+  assert.strictEqual(M.inlineMarkup("see https://example.com/a?b=1&c=2 now", "#abcdef"),
+    'see <a href="https://example.com/a?b=1&amp;c=2">https://example.com/a?b=1&amp;c=2</a> now')
+  assert.strictEqual(M.inlineMarkup("www.omarchy.org", "#abcdef"),
+    '<a href="https://www.omarchy.org">www.omarchy.org</a>')
+  assert.strictEqual(M.inlineMarkup("**bold** http://x.io", ""),
+    '<b>bold</b> <a href="http://x.io">http://x.io</a>')
+})
+
+test("inlineMarkup: an underscore or a star in an address is not a mark", () => {
+  assert.strictEqual(M.inlineMarkup("https://x.io/a_b_c/*d*/e", ""),
+    '<a href="https://x.io/a_b_c/*d*/e">https://x.io/a_b_c/*d*/e</a>')
+  assert.strictEqual(M.inlineMarkup("**https://x.io**", ""), '<b><a href="https://x.io">https://x.io</a></b>')
+})
+
+test("inlineMarkup leaves the sentence's punctuation out of a link", () => {
+  assert.strictEqual(M.inlineMarkup("go to https://x.io.", ""), 'go to <a href="https://x.io">https://x.io</a>.')
+  assert.strictEqual(M.inlineMarkup("(https://x.io)", ""), '(<a href="https://x.io">https://x.io</a>)')
+  assert.strictEqual(M.inlineMarkup("https://en.wikipedia.org/wiki/Dune_(novel)", ""),
+    '<a href="https://en.wikipedia.org/wiki/Dune_(novel)">https://en.wikipedia.org/wiki/Dune_(novel)</a>')
+})
+
+test("only web addresses become links, and nothing gets out of the href", () => {
+  for (const t of ["file:///etc/passwd", "javascript:alert(1)", "mailto:a@b.c", "ftp://x.io", "notwww.x.io"])
+    assert.ok(!M.inlineMarkup(t, "").includes("<a "), t)
+  const evil = M.inlineMarkup('https://x.io/"><b>hi', "")
+  assert.ok(!evil.includes('"><b>'), evil)
+  assert.ok(!M.inlineMarkup("https://x.io/<script>", "").includes("<script>"))
+})
+
+test("linksIn lists a note's links as they would be opened", () => {
+  assert.deepStrictEqual(plain(M.linksIn("a https://a.io, and\n- www.b.io!")), ["https://a.io", "https://www.b.io"])
+  assert.deepStrictEqual(plain(M.linksIn("")), [])
+})
+
+// ---------------------------------------------------------- numbered lists
+
+test("parseLines reads numbered lines, keeping the number as written", () => {
+  const l = plain(M.parseLines("1. one\n4) four\n  12. deep\n1.nope\n2024. a year"))
+  assert.deepStrictEqual(l.slice(0, 3).map(x => [x.kind, x.number, x.body, x.indent]),
+    [["number", "1.", "one", 0], ["number", "4)", "four", 0], ["number", "12.", "deep", 2]])
+  assert.strictEqual(l[3].kind, "text")
+  assert.strictEqual(l[4].kind, "text")
+})
+
+test("toggleNumber counts on from the line above, and takes the number off", () => {
+  assert.strictEqual(M.toggleNumber("milk", 0), "1. milk")
+  assert.strictEqual(M.toggleNumber("1. milk\neggs", 1), "1. milk\n2. eggs")
+  assert.strictEqual(M.toggleNumber("7) milk\neggs", 1), "7) milk\n8) eggs")
+  assert.strictEqual(M.toggleNumber("3. milk", 0), "milk")
+  assert.strictEqual(M.toggleNumber("- milk", 0), "1. milk")
+  assert.strictEqual(M.toggleNumber("  [ ] milk", 0), "  1. milk")
+  assert.strictEqual(M.toggleNumber("x", 5), "x")
+})
+
+test("togglePrefix swaps a number for another mark", () => {
+  assert.strictEqual(M.togglePrefix("2. milk", 0, "- "), "- milk")
+  assert.strictEqual(M.togglePrefix("2. milk", 0, "# "), "# milk")
+})
+
+test("continueList carries bullets, numbers and boxes on to the next line", () => {
+  assert.deepStrictEqual(plain(M.continueList("- milk", 6)), { text: "- milk\n- ", cursor: 9 })
+  assert.deepStrictEqual(plain(M.continueList("* milk", 6)), { text: "* milk\n* ", cursor: 9 })
+  assert.deepStrictEqual(plain(M.continueList("9. milk", 7)), { text: "9. milk\n10. ", cursor: 12 })
+  assert.deepStrictEqual(plain(M.continueList("1) a", 4)), { text: "1) a\n2) ", cursor: 8 })
+  assert.deepStrictEqual(plain(M.continueList("[x] done", 8)), { text: "[x] done\n[ ] ", cursor: 13 })
+  assert.deepStrictEqual(plain(M.continueList("- [x] done", 10)), { text: "- [x] done\n- [ ] ", cursor: 17 })
+  assert.deepStrictEqual(plain(M.continueList("  - deep", 8)), { text: "  - deep\n  - ", cursor: 13 })
+})
+
+test("continueList splits an item in the middle, and works on any line", () => {
+  assert.deepStrictEqual(plain(M.continueList("- milkeggs", 6)), { text: "- milk\n- eggs", cursor: 9 })
+  assert.deepStrictEqual(plain(M.continueList("top\n1. a\nend", 8)), { text: "top\n1. a\n2. \nend", cursor: 12 })
+})
+
+test("continueList ends the list on an empty item, and leaves the rest alone", () => {
+  assert.deepStrictEqual(plain(M.continueList("- milk\n- ", 9)), { text: "- milk\n", cursor: 7 })
+  assert.deepStrictEqual(plain(M.continueList("1. a\n2. \nnext", 8)), { text: "1. a\n\nnext", cursor: 5 })
+  assert.strictEqual(M.continueList("plain text", 5), null)
+  assert.strictEqual(M.continueList("# Heading", 9), null)
+  assert.strictEqual(M.continueList("- milk", 1), null)      // in the marker
+  assert.strictEqual(M.continueList("", 0), null)
+})
+
+// -------------------------------------------------------------------- undo
+
+test("pushDeleted keeps the newest few, popDeleted hands back the newest first", () => {
+  let stack = []
+  for (let i = 0; i < M.UNDO_DEPTH + 5; i++) stack = M.pushDeleted(stack, { id: "n" + i })
+  assert.strictEqual(stack.length, M.UNDO_DEPTH)
+  assert.strictEqual(stack[0].id, "n5")
+  let r = M.popDeleted(stack, [])
+  assert.strictEqual(r.note.id, "n" + (M.UNDO_DEPTH + 4))
+  r = M.popDeleted(r.stack, [])
+  assert.strictEqual(r.note.id, "n" + (M.UNDO_DEPTH + 3))
+  assert.strictEqual(r.stack.length, M.UNDO_DEPTH - 2)
+})
+
+test("popDeleted skips a note that is back on the board already", () => {
+  const r = M.popDeleted([{ id: "a" }, { id: "b" }], [{ id: "b" }])
+  assert.strictEqual(r.note.id, "a")
+  assert.strictEqual(r.stack.length, 0)
+  assert.deepStrictEqual(plain(M.popDeleted([], [])), { note: null, stack: [] })
+  assert.strictEqual(M.popDeleted([{ id: "b" }], [{ id: "b" }]).note, null)
+})
+
+// ------------------------------------------------------------- am and pm
+
+test("parseWhen reads 12-hour times with am and pm", () => {
+  assert.strictEqual(M.parseWhen("3pm", NOW), at(0, 15, 0))
+  assert.strictEqual(M.parseWhen("3:30 pm", NOW), at(0, 15, 30))
+  assert.strictEqual(M.parseWhen("at 11.15pm", NOW), at(0, 23, 15))
+  assert.strictEqual(M.parseWhen("9am", NOW), at(1, 9, 0))
+  assert.strictEqual(M.parseWhen("12pm", NOW), at(1, 12, 0))
+  assert.strictEqual(M.parseWhen("12am", NOW), at(1, 0, 0))
+  assert.strictEqual(M.parseWhen("tomorrow 7pm", NOW), at(1, 19, 0))
+  assert.strictEqual(M.parseWhen("tomorrow at 12:30am", NOW), at(1, 0, 30))
+  for (const t of ["0am", "13pm", "tomorrow 13pm", "9:75am"]) assert.strictEqual(M.parseWhen(t, NOW), 0, t)
+})
+
 if (failed) { console.log(failed + " failed"); process.exit(1) }
 console.log("all passed")

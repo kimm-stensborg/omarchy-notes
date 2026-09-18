@@ -46,7 +46,7 @@ border and font, with Hyprland's corner rounding.
   again -- hiding the board, or restarting the shell, leaves it be. Moving a
   note by hand also ends the tiled view.
 - **Reminders:** `Alt+R` sets a time on the note you're on -- a preset, or
-  type `45m`, `2h`, `1h30`, `3d`, `9:00` or `tomorrow 8:30`. The note comes
+  type `45m`, `2h`, `1h30`, `3d`, `9:00`, `3pm` or `tomorrow 8:30`. The note comes
   out to the middle of its screen to be asked, as it does for writing, and
   goes back once you have answered. When it comes
   up you get a notification, and clicking it opens the board with that note
@@ -62,7 +62,9 @@ border and font, with Hyprland's corner rounding.
   middle of its screen to be asked and goes back if you keep it, so the
   question is put on the note itself at a size you can read rather than on a
   card an inch across. The note nearest the one that went takes over, so the
-  board is never left pointing at nothing, and `Ctrl+Z` brings it back.
+  board is never left pointing at nothing, and `Ctrl+Z` brings it back --
+  the last twenty deleted notes, newest first, one press each, for as long
+  as the shell is running. The note comes back in hand.
 - **Theme:** everything follows `omarchy theme set`.
 - **Unplugged monitors:** notes whose monitor is gone borrow the screen you
   are looking at and show `↩ <monitor>`. They go back home as soon as it is
@@ -84,13 +86,24 @@ puts the plain text back the moment you click into it.
 | `` `code` `` | `Ctrl + E` | tinted in your accent colour |
 | `# Heading` | `Ctrl + 1` | large bold heading (`##` / `###`, `Ctrl + 2` / `3`) |
 | `- item` | `Ctrl + L` | bullet in your accent colour |
+| `1. item` | `Ctrl + N` | numbered line, the number as you wrote it (`1)` works too) |
 | `[ ] task` | `Ctrl + K` | checkbox you can click to tick |
+| `https://…` or `www.…` | | a link in your accent colour; click it to open it in your browser |
 
 Select some text and the toolbar turns to these, since holding a selection is
 asking what can be done to it. Every key toggles, so pressing it again takes
 the mark off. With nothing
 selected, `Ctrl + B` and friends take the word the cursor is in. Ticked
 lines are dimmed and struck through, and `- [ ] task` works too.
+
+`Ctrl + N` counts on from the line above, so pressing it down a list numbers
+it 1, 2, 3. `Enter` in a list starts the next item -- the same bullet, the
+next number, an empty box -- and `Enter` on an item with nothing in it ends
+the list. `Shift + Enter` is a plain new line.
+
+Only web addresses become links, so nothing written in a note can open a file
+or run a command. Clicking anywhere else on the line still picks up the note
+or opens it for writing.
 
 ## Install
 
@@ -134,7 +147,7 @@ Your notes stay in `~/Documents/notes.json`.
 | drag | Move a note, anywhere on it, across monitors |
 | right-click | Delete that note, after a yes or no |
 | `Esc` | Put a note that is shown on its own back where it lives, then hide the board |
-| `Ctrl + Z` | Restore the last deleted note |
+| `Ctrl + Z` | Bring back the last deleted note; again for the one before it |
 
 The toolbar at the top of the screen you are working on says which of these
 are live where you stand, so the keys are in front of you rather than in this

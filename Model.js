@@ -391,16 +391,20 @@ function zoomFit(w, h, s, factor, margin) {
 
 // ---------------------------------------------------------------- markdown
 
-// A deliberately small dialect: headings, bullets, checkboxes, and inline
-// bold / italic / underline / strike / code. The card renders it; the
-// editor shows the plain text it is written in.
+// A deliberately small dialect: headings, bullets, numbered lines,
+// checkboxes, inline bold / italic / underline / strike / code, and web
+// links. The card renders it; the editor shows the plain text it is written in.
 var CHECK_RE = /^(\s*)(?:[-*]\s+)?\[( |x|X)\]\s?(.*)$/
 var HEAD_RE = /^(\s*)(#{1,3})\s+(.*)$/
 var BULLET_RE = /^(\s*)[-*]\s+(.*)$/
+// "1. " or "1) ", the number kept as written: a list you renumbered by hand,
+// or one that starts at 4, reads the way you wrote it.
+var NUMBER_RE = /^(\s*)(\d{1,3})([.)])\s+(.*)$/
 // Everything a block prefix can be, for toggling one off or swapping it.
-var PREFIX_RE = /^(?:#{1,3}\s+|[-*]\s+(?:\[[ xX]\]\s?)?|\[[ xX]\]\s?)/
+var PREFIX_RE = /^(?:#{1,3}\s+|[-*]\s+(?:\[[ xX]\]\s?)?|\[[ xX]\]\s?|\d{1,3}[.)]\s+)/
 
-// -> [{ index, kind: "check"|"head"|"bullet"|"text", check, level, indent, body }]
+// -> [{ index, kind: "check"|"head"|"bullet"|"number"|"text", check, level,
+//       indent, body, number }] -- number is the marker as written, "3."
 function parseLines(text) {
   var lines = String(text || "").split("\n")
   var out = []
@@ -413,6 +417,9 @@ function parseLines(text) {
       out.push({ index: i, kind: "head", check: null, level: m[2].length, indent: m[1].length, body: m[3] })
     else if ((m = BULLET_RE.exec(raw)))
       out.push({ index: i, kind: "bullet", check: null, level: 0, indent: m[1].length, body: m[2] })
+    else if ((m = NUMBER_RE.exec(raw)))
+      out.push({ index: i, kind: "number", check: null, level: 0, indent: m[1].length, body: m[4],
+                 number: m[2] + m[3] })
     else
       out.push({ index: i, kind: "text", check: null, level: 0, indent: 0, body: raw })
   }
@@ -439,6 +446,51 @@ function togglePrefix(text, index, prefix) {
   var current = rest.slice(0, rest.length - stripped.length)
   lines[index] = indent + (current === prefix ? "" : prefix) + stripped
   return lines.join("\n")
+}
+
+// Ctrl+N: number the line, carrying on from the line above when that one is
+// numbered too -- so pressing it down a list counts 1, 2, 3 -- or take the
+// number off again.
+function toggleNumber(text, index) {
+  var lines = String(text || "").split("\n")
+  if (index < 0 || index >= lines.length) return String(text || "")
+  var m = NUMBER_RE.exec(lines[index])
+  if (m) {
+    lines[index] = m[1] + m[4]
+  } else {
+    var above = index > 0 ? NUMBER_RE.exec(lines[index - 1]) : null
+    var lead = /^(\s*)([\s\S]*)$/.exec(lines[index])
+    lines[index] = lead[1] + (above ? (Number(above[2]) + 1) + above[3] : "1.") + " "
+      + lead[2].replace(PREFIX_RE, "")
+  }
+  return lines.join("\n")
+}
+
+// Enter in a list carries the list on: the next line starts with the same
+// bullet, the next number, or an empty box. Enter on an item with nothing
+// written in it ends the list instead, leaving the line bare, which is how
+// you get out of one. Anything else -- the cursor in the marker, a line
+// that is not a list -- is a plain new line, and gets null.
+//   -> { text, cursor } or null
+var LIST_RE = /^(\s*)((?:[-*]\s+)?\[[ xX]\]\s?|[-*]\s+|\d{1,3}[.)]\s+)(.*)$/
+function continueList(text, pos) {
+  var t = String(text || "")
+  pos = clamp(pos, 0, t.length)
+  var start = t.lastIndexOf("\n", pos - 1) + 1
+  var end = t.indexOf("\n", pos)
+  if (end < 0) end = t.length
+  var m = LIST_RE.exec(t.slice(start, end))
+  if (!m) return null
+  var markerEnd = start + m[1].length + m[2].length
+  if (pos < markerEnd) return null
+  if (m[3].trim() === "" && pos === end)
+    return { text: t.slice(0, start) + t.slice(end), cursor: start }
+  var marker = m[2]
+  var num = /^(\d{1,3})([.)])(\s+)$/.exec(marker)
+  if (num) marker = (Number(num[1]) + 1) + num[2] + num[3]
+  else marker = marker.replace(/\[[xX]\]/, "[ ]")
+  var insert = "\n" + m[1] + marker
+  return { text: t.slice(0, pos) + insert + t.slice(pos), cursor: pos + insert.length }
 }
 
 function lineIndexAt(text, pos) {
@@ -470,10 +522,37 @@ function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+// A web address in a note: http(s) written out, or one starting www. Only
+// these become links -- nothing in a note can open a file or run anything.
+// Punctuation that ends the sentence around a link is not part of it.
+var URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"`]+/g
+function linkTarget(url) {
+  return /^www\./i.test(url) ? "https://" + url : url
+}
+function trimUrl(url) {
+  var trail = ""
+  while (/[.,;:!?'")\]*_~]$/.test(url)) {
+    // A closing bracket that the address itself opened belongs to it.
+    var last = url.charAt(url.length - 1)
+    if (last === ")" && url.split("(").length > url.split(")").length - 1) break
+    trail = last + trail
+    url = url.slice(0, -1)
+  }
+  return { url: url, trail: trail }
+}
+
 // One line of body text -> Qt StyledText. Code spans are tinted with the
-// accent colour the caller passes in.
+// accent colour the caller passes in, and so are links. Links are taken out
+// before the marks are read and put back after, so an underscore or a star
+// in an address is never read as italics.
 function inlineMarkup(body, accentHex) {
-  var t = escapeHtml(body)
+  var links = []
+  var raw = String(body).replace(URL_RE, function(found) {
+    var u = trimUrl(found)
+    links.push(u.url)
+    return "\u0000" + (links.length - 1) + "\u0000" + u.trail
+  })
+  var t = escapeHtml(raw)
   t = t.replace(/`([^`]+)`/g, function(all, code) {
     return '<font color="' + (accentHex || "#888888") + '">' + code + "</font>"
   })
@@ -482,7 +561,43 @@ function inlineMarkup(body, accentHex) {
   t = t.replace(/__([^_]+)__/g, "<u>$1</u>")
   t = t.replace(/\*([^*]+)\*/g, "<i>$1</i>")
   t = t.replace(/(^|[^\w])_([^_]+)_(?![\w])/g, "$1<i>$2</i>")
+  t = t.replace(/\u0000(\d+)\u0000/g, function(all, i) {
+    var url = links[Number(i)]
+    return '<a href="' + escapeHtml(linkTarget(url)).replace(/"/g, "&quot;") + '">' + escapeHtml(url) + "</a>"
+  })
   return t
+}
+
+// The links in a note's text, as they would be opened.
+function linksIn(text) {
+  var out = []
+  String(text || "").replace(URL_RE, function(found) { out.push(linkTarget(trimUrl(found).url)) })
+  return out
+}
+
+// -------------------------------------------------------------------- undo
+
+// How many deleted notes Ctrl+Z can bring back, newest first.
+var UNDO_DEPTH = 20
+
+// The deleted notes with one more on top, the oldest falling off the end.
+function pushDeleted(stack, note) {
+  var next = (stack || []).concat([note])
+  return next.length > UNDO_DEPTH ? next.slice(next.length - UNDO_DEPTH) : next
+}
+
+// The newest deleted note that is not back on the board already -- put back
+// by hand in the file, say -- and the stack without it and anything above it.
+//   -> { note, stack }; note is null when there is nothing to bring back
+function popDeleted(stack, notes) {
+  var rest = (stack || []).slice()
+  var present = {}
+  for (var i = 0; i < (notes || []).length; i++) present[notes[i].id] = true
+  while (rest.length > 0) {
+    var note = rest.pop()
+    if (!present[note.id]) return { note: note, stack: rest }
+  }
+  return { note: null, stack: rest }
 }
 
 // -------------------------------------------------------------- reminders
@@ -516,7 +631,8 @@ function unitMs(unit) {
 // What someone types into the reminder field -> a timestamp in ms, or 0 when
 // it says nothing we understand. A bare number is minutes, which is what
 // gets typed when you are in a hurry. Understood:
-//   45  45m  90 mins  2h  1.5h  1h30  3d  9:00  14.30  tomorrow  tomorrow 8:30
+//   45  45m  90 mins  2h  1.5h  1h30  3d  9:00  14.30  9am  3:30pm
+//   tomorrow  tomorrow 8:30  tomorrow 7pm
 // with a leading "in" or "at" allowed on any of them.
 function parseWhen(text, nowMs) {
   var t = str(text).toLowerCase().replace(/^(?:in|at)\s+/, "")
@@ -524,15 +640,24 @@ function parseWhen(text, nowMs) {
   var m
 
   // tomorrow, on its own or at a time; nine in the morning unless told otherwise
-  if ((m = /^tomorrow(?:\s+(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?)?$/.exec(t))) {
+  if ((m = /^tomorrow(?:\s+(?:at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?)?$/.exec(t))) {
     var th = m[1] === undefined ? 9 : Number(m[1])
     var tm = m[2] === undefined ? 0 : Number(m[2])
+    if (m[3]) {
+      if (th < 1 || th > 12) return 0
+      th = th % 12 + (m[3] === "pm" ? 12 : 0)
+    }
     return th > 23 || tm > 59 ? 0 : atClock(nowMs, th, tm, 1)
   }
 
-  // a clock time: today while it is still to come, else the same time tomorrow
-  if ((m = /^(\d{1,2})[:.](\d{2})$/.exec(t))) {
-    var hh = Number(m[1]), mm = Number(m[2])
+  // a clock time: today while it is still to come, else the same time
+  // tomorrow. 24-hour, or 12-hour with am / pm, where the minutes are optional
+  if ((m = /^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)$/.exec(t)) || (m = /^(\d{1,2})[:.](\d{2})$/.exec(t))) {
+    var hh = Number(m[1]), mm = m[2] === undefined ? 0 : Number(m[2])
+    if (m[3]) {
+      if (hh < 1 || hh > 12) return 0
+      hh = hh % 12 + (m[3] === "pm" ? 12 : 0)
+    }
     if (hh > 23 || mm > 59) return 0
     var when = atClock(nowMs, hh, mm, 0)
     return when > nowMs ? when : atClock(nowMs, hh, mm, 1)

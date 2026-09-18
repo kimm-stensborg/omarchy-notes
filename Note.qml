@@ -18,8 +18,9 @@ import "Model.js" as Model
 // editor scroll inside the card. While writing, the view follows the
 // cursor; while selected, the arrows scroll it.
 //
-// The text is a small markdown dialect -- headings, bullets, checkboxes and
-// inline bold / italic / underline / strike / code. The card renders it and
+// The text is a small markdown dialect -- headings, bullets, numbered lines,
+// checkboxes, inline bold / italic / underline / strike / code, and web links
+// you can click. The card renders it and
 // the editor shows the plain text, with Ctrl shortcuts that write the marks
 // for you (see the README).
 Item {
@@ -246,12 +247,34 @@ Item {
   }
 
   // Ctrl+1 and friends: put a block mark on the line the cursor is in.
+  // Ctrl+N numbers it, counting on from the line above.
   function prefixLine(prefix) {
     var pos = editor.cursorPosition
     var was = editor.text
-    var next = Model.togglePrefix(was, Model.lineIndexAt(was, pos), prefix)
+    var index = Model.lineIndexAt(was, pos)
+    var next = prefix === "1. " ? Model.toggleNumber(was, index) : Model.togglePrefix(was, index, prefix)
     editor.text = next
     editor.cursorPosition = Math.max(0, Math.min(next.length, pos + next.length - was.length))
+  }
+
+  // Enter in a list starts the next item, and Enter on an empty item ends
+  // the list. Made as an insert or a removal rather than by setting the
+  // text, so Ctrl+Z in the note takes it back like any other typing.
+  function continueList() {
+    if (editor.selectedText !== "") return false
+    var was = editor.text
+    var r = Model.continueList(was, editor.cursorPosition)
+    if (!r) return false
+    if (r.text.length > was.length) editor.insert(editor.cursorPosition, r.text.slice(editor.cursorPosition, r.cursor))
+    else editor.remove(r.cursor, r.cursor + was.length - r.text.length)
+    editor.cursorPosition = r.cursor
+    return true
+  }
+
+  // A link on the card, clicked. Only web addresses are ever made links;
+  // this says so again rather than trusting it.
+  function openLink(link) {
+    if (/^https?:\/\//i.test(link)) Qt.openUrlExternally(link)
   }
 
   Component.onCompleted: {
@@ -447,11 +470,25 @@ Item {
                 font.pixelSize: card.textSize
               }
 
+              // The number as written, in the accent colour a bullet wears.
+              Text {
+                id: numberMark
+                visible: line.kind === "number"
+                x: line.markerX
+                y: line.topPad
+                text: line.modelData.number || ""
+                color: card.accent
+                font.family: card.fontFamily
+                font.pixelSize: card.textSize
+                font.features: { "tnum": 1 }
+              }
+
               Text {
                 id: lineText
                 x: {
                   if (line.kind === "check") return box.x + box.width + Style.spacing.md
                   if (line.kind === "bullet") return bullet.x + bullet.width + Style.spacing.md
+                  if (line.kind === "number") return numberMark.x + numberMark.width + Style.spacing.sm
                   return line.markerX
                 }
                 y: line.topPad
@@ -460,6 +497,11 @@ Item {
                   ? " " : Model.inlineMarkup(line.modelData.body, card.accentHex)
                 textFormat: Text.StyledText
                 wrapMode: Text.Wrap
+                // A link opens in the browser. Anywhere else on the line,
+                // the press falls through to the card: a drag, or a click
+                // to write.
+                linkColor: card.accent
+                onLinkActivated: function(link) { card.openLink(link) }
                 color: line.done ? Util.alpha(card.foreground, 0.45) : card.foreground
                 font.strikeout: line.done
                 font.family: card.fontFamily
@@ -468,6 +510,13 @@ Item {
                   if (line.kind !== "head") return card.textSize
                   if (line.modelData.level === 1) return card.headingSize
                   return card.textSize
+                }
+
+                HoverHandler {
+                  id: linkHover
+                  cursorShape: card.dragging ? Qt.ClosedHandCursor
+                    : (lineText.linkAt(linkHover.point.position.x, linkHover.point.position.y) !== ""
+                       ? Qt.PointingHandCursor : Qt.IBeamCursor)
                 }
               }
             }
@@ -568,6 +617,12 @@ Item {
               event.accepted = true
               return
             }
+            // Enter in a list carries it on. Shift + Enter is a plain new line.
+            if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
+                && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
+              if (card.continueList()) event.accepted = true
+              return
+            }
             if (!(event.modifiers & Qt.ControlModifier)) return
             var marker = ""
             if (event.key === Qt.Key_B) marker = "**"
@@ -585,6 +640,7 @@ Item {
             else if (event.key === Qt.Key_2) prefix = "## "
             else if (event.key === Qt.Key_3) prefix = "### "
             else if (event.key === Qt.Key_L) prefix = "- "
+            else if (event.key === Qt.Key_N) prefix = "1. "
             else if (event.key === Qt.Key_K) prefix = "[ ] "
             if (prefix !== "") {
               card.prefixLine(prefix)
