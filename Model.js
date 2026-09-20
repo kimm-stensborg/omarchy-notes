@@ -575,6 +575,309 @@ function linksIn(text) {
   return out
 }
 
+// --------------------------------------------------------- rich editing
+
+// Writing in a note shows the marks done rather than written: **bold** comes
+// out bold, and the "# " comes off the front of a heading. The markers that
+// build a list -- "- ", "1. ", "[ ] " -- stay as you typed them, because
+// they are how you go on typing the list. Ctrl+M shows the plain markdown
+// instead, and the note is still markdown on disk either way.
+//
+// The editor is a Qt rich text document, so the note goes in as HTML and
+// comes back as the HTML Qt writes. Both directions carry a map from what is
+// on the screen to where it stands in the markdown -- map[shown] = written --
+// which is what lets Ctrl+B and Enter-in-a-list work on the text you see.
+
+// A heading is only hidden when it is written exactly "# ", with nothing in
+// front of it: then putting the marks back is the same characters again, and
+// a note is never rewritten behind your back.
+var RICH_HEAD_RE = /^(#{1,3}) (.*)$/
+var RICH_URL_RE = /^(?:https?:\/\/|www\.)[^\s<>"`]+/
+
+// Read in this order, the same order the card renders them in, so what you
+// are writing in and what you get when you leave agree.
+var RICH_MARKS = [
+  { kind: "code", mark: "`", re: /^`([^`]+)`/ },
+  { kind: "strike", mark: "~~", re: /^~~([^~]+)~~/ },
+  { kind: "bold", mark: "**", re: /^\*\*([^*]+)\*\*/ },
+  { kind: "under", mark: "__", re: /^__([^_]+)__/ },
+  { kind: "italic", mark: "*", re: /^\*([^*]+)\*/ },
+  { kind: "italic", mark: "_", re: /^_([^_]+)_(?!\w)/, wordEdge: true }
+]
+
+function richStyle(kind, accent, codeBack) {
+  // Code is told apart from a link by its tint, not by a monospace family:
+  // the note's own font is monospace already, so a family would say nothing.
+  if (kind === "code") return "background-color:" + codeBack + "; color:" + accent + ";"
+  if (kind === "link") return "color:" + accent + ";"
+  if (kind === "bold") return "font-weight:700;"
+  if (kind === "italic") return "font-style:italic;"
+  if (kind === "under") return "text-decoration: underline;"
+  if (kind === "strike") return "text-decoration: line-through;"
+  return ""
+}
+
+// One line of markdown pulled apart for the editor:
+//   level   1..3 when the "#" marks come off, 0 otherwise
+//   visible the block marker kept as written -- "- ", "  1) ", "[x] "
+//   segs    the rest, as runs of { kind, open, inner, close }
+// open and close are the marker characters, which the editor hides; inner is
+// what is shown. The runs are contiguous and cover the body exactly.
+function richLine(raw) {
+  var s = String(raw)
+  var head = RICH_HEAD_RE.exec(s)
+  if (head) return { level: head[1].length, visible: "", segs: richSegments(head[2]) }
+  var lead = /^(\s*)/.exec(s)[1]
+  var pm = PREFIX_RE.exec(s.slice(lead.length))
+  var visible = lead + (pm ? pm[0] : "")
+  return { level: 0, visible: visible, segs: richSegments(s.slice(visible.length)) }
+}
+
+// The marks in a line, in the order the card reads them. A web address is a
+// run of its own so an underscore inside one is never read as italics -- and
+// it stays plain text, not a link, since a click in the editor belongs to
+// the caret.
+function richSegments(body) {
+  var s = String(body)
+  var segs = []
+  var plain = ""
+  function flush() {
+    if (plain !== "") { segs.push({ kind: "plain", open: "", inner: plain, close: "" }); plain = "" }
+  }
+  var i = 0
+  while (i < s.length) {
+    var rest = s.slice(i)
+    var prev = i > 0 ? s.charAt(i - 1) : ""
+    var hit = null
+    for (var k = 0; k < RICH_MARKS.length && !hit; k++) {
+      var d = RICH_MARKS[k]
+      if (d.wordEdge && /\w/.test(prev)) continue
+      var m = d.re.exec(rest)
+      if (m) hit = { kind: d.kind, open: d.mark, inner: m[1], close: d.mark }
+    }
+    if (!hit && !/\w/.test(prev)) {
+      var u = RICH_URL_RE.exec(rest)
+      if (u) {
+        var t = trimUrl(u[0])
+        if (t.url !== "") hit = { kind: "link", open: "", inner: t.url, close: "" }
+      }
+    }
+    if (hit) {
+      flush()
+      segs.push(hit)
+      i += hit.open.length + hit.inner.length + hit.close.length
+    } else {
+      plain += s.charAt(i)
+      i++
+    }
+  }
+  flush()
+  return segs
+}
+
+// What the editor shows for a note: the text with its marks done.
+function richPlain(text) {
+  var lines = String(text || "").split("\n")
+  var out = []
+  for (var i = 0; i < lines.length; i++) {
+    var L = richLine(lines[i])
+    var line = L.visible
+    for (var j = 0; j < L.segs.length; j++) line += L.segs[j].inner
+    out.push(line)
+  }
+  return out.join("\n")
+}
+
+// The note as HTML for the editor, with the map from shown to written.
+// Sizes come from the card so a heading is as big here as it is on the card.
+//   opts: { accentHex, codeBackHex, textSize, headingSize, lineGap, headGap }
+//   -> { html, map }
+function richHtml(text, opts) {
+  opts = opts || {}
+  var accent = opts.accentHex || "#888888"
+  var codeBack = opts.codeBackHex || "#333333"
+  var gap = Math.round(opts.lineGap || 0)
+  var headGap = Math.round(opts.headGap || 0)
+  var lines = String(text || "").split("\n")
+  var html = []
+  var map = []
+  var src = 0
+
+  function emit(shown, kind) {
+    if (shown === "") return ""
+    for (var j = 0; j < shown.length; j++) map.push(src + j)
+    var esc = escapeHtml(shown)
+    var style = kind === "plain" ? "" : richStyle(kind, accent, codeBack)
+    return style === "" ? esc : '<span style="' + style + '">' + esc + "</span>"
+  }
+
+  for (var i = 0; i < lines.length; i++) {
+    if (i > 0) { map.push(src); src += 1 }
+    var L = richLine(lines[i])
+    if (L.level > 0) src += L.level + 1
+    var inner = emit(L.visible, "plain")
+    src += L.visible.length
+    for (var k = 0; k < L.segs.length; k++) {
+      var seg = L.segs[k]
+      src += seg.open.length
+      inner += emit(seg.inner, seg.kind)
+      src += seg.inner.length + seg.close.length
+    }
+    var tag = L.level > 0 ? "h" + L.level : "p"
+    // Qt keeps the style it is given and writes it back out, so the note
+    // reads with the card's spacing rather than a browser's.
+    var style = "margin-top:" + (L.level > 0 && i > 0 ? headGap : 0) + "px;"
+      + " margin-bottom:" + gap + "px; -qt-block-indent:0; text-indent:0px;"
+      + " white-space:pre-wrap;"
+    if (L.level === 1 && opts.headingSize) style += " font-size:" + Math.round(opts.headingSize) + "px;"
+    else if (L.level > 1 && opts.textSize) style += " font-size:" + Math.round(opts.textSize) + "px;"
+    // A line with nothing on it is said the way Qt says it: an empty block
+    // is dropped, and a <br /> on its own would be a character you could put
+    // the caret after but never see.
+    if (inner === "") style += " -qt-paragraph-type:empty;"
+    html.push("<" + tag + ' style="' + style + '">' + (inner === "" ? "<br />" : inner) + "</" + tag + ">")
+  }
+  map.push(src)
+  return { html: html.join(""), map: map }
+}
+
+function richUnescape(s) {
+  return String(s)
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, function(all, n) { return String.fromCharCode(Number(n)) })
+    .replace(/&amp;/g, "&")
+    .replace(/ /g, " ")
+}
+
+// Which marks a Qt style string is wearing. Code is told apart by its tint:
+// a link is the accent colour alone, and nothing else in a note is painted.
+function richMarks(style) {
+  var s = String(style || "").toLowerCase()
+  return {
+    code: /background-color:/.test(s),
+    bold: /font-weight:\s*(?:700|800|900|bold)/.test(s),
+    italic: /font-style:\s*italic/.test(s),
+    under: /text-decoration:[^;]*underline/.test(s),
+    strike: /text-decoration:[^;]*line-through/.test(s)
+  }
+}
+
+function richWrap(m) {
+  if (m.code) return { open: "`", close: "`" }
+  var open = "", close = ""
+  if (m.strike) { open += "~~"; close = "~~" + close }
+  if (m.bold) { open += "**"; close = "**" + close }
+  if (m.under) { open += "__"; close = "__" + close }
+  if (m.italic) { open += "*"; close = "*" + close }
+  return { open: open, close: close }
+}
+
+var RICH_BLOCK_RE = /<(p|h1|h2|h3)\b([^>]*)>([\s\S]*?)<\/\1>/gi
+var RICH_TAG_RE = /<(\/?)(span|a|br)\b([^>]*?)\/?>/gi
+
+// The marks every span around this run puts on it together. Inside a link
+// they are dropped: Qt paints anchors underlined and blue of its own accord,
+// and that is not something the note said.
+function richMarksNow(stack, anchors, heading) {
+  var m = { code: false, bold: false, italic: false, under: false, strike: false }
+  if (anchors > 0) return m
+  for (var q = 0; q < stack.length; q++)
+    for (var key in m) if (stack[q][key]) m[key] = true
+  // A heading is written bold by the tag, not by the note.
+  if (heading) m.bold = false
+  return m
+}
+
+// Runs are gathered before they are written, so a line that Qt happened to
+// split in two does not come back as "**a****b**".
+function richPut(acc, text, marks) {
+  var w = richWrap(marks)
+  acc.out += w.open
+  for (var j = 0; j < text.length; j++) { acc.map.push(acc.out.length); acc.out += text.charAt(j) }
+  acc.out += w.close
+}
+
+function richAdd(acc, text, marks) {
+  if (text === "") return
+  if (acc.marks !== null && richWrap(acc.marks).open === richWrap(marks).open) { acc.pending += text; return }
+  if (acc.marks !== null) richPut(acc, acc.pending, acc.marks)
+  acc.pending = text
+  acc.marks = marks
+}
+
+function richFlush(acc) {
+  if (acc.marks !== null) richPut(acc, acc.pending, acc.marks)
+  acc.pending = ""
+  acc.marks = null
+}
+
+// The HTML Qt hands back -> the note's markdown, with the map from shown to
+// written. Text that is not a document -- the plain markdown of Ctrl+M --
+// comes back as itself.
+//   -> { text, map }
+function richParse(html) {
+  var s = String(html || "")
+  if (s.indexOf("<body") < 0) {
+    var flat = []
+    for (var n = 0; n <= s.length; n++) flat.push(n)
+    return { text: s, map: flat }
+  }
+  s = s.slice(s.indexOf(">", s.indexOf("<body")) + 1)
+  var end = s.lastIndexOf("</body>")
+  if (end >= 0) s = s.slice(0, end)
+
+  var acc = { out: "", map: [], pending: "", marks: null }
+  var first = true
+
+  RICH_BLOCK_RE.lastIndex = 0
+  var block
+  while ((block = RICH_BLOCK_RE.exec(s)) !== null) {
+    var tag = block[1].toLowerCase()
+    var heading = tag !== "p"
+    var inner = block[3]
+    if (!first) { acc.map.push(acc.out.length); acc.out += "\n" }
+    first = false
+    if (tag !== "p") acc.out += new Array(Number(tag.charAt(1)) + 1).join("#") + " "
+    if (inner === "" || /^\s*<br\s*\/?>\s*$/i.test(inner)) continue
+
+    var stack = []
+    var anchors = 0
+    var at = 0
+    RICH_TAG_RE.lastIndex = 0
+    var t
+    while ((t = RICH_TAG_RE.exec(inner)) !== null) {
+      richAdd(acc, richUnescape(inner.slice(at, t.index)), richMarksNow(stack, anchors, heading))
+      at = t.index + t[0].length
+      var closing = t[1] === "/"
+      var name = t[2].toLowerCase()
+      if (name === "br") { richAdd(acc, "\n", richMarksNow(stack, anchors, heading)); continue }
+      if (name === "a") { anchors = closing ? Math.max(0, anchors - 1) : anchors + 1; continue }
+      if (closing) stack.pop()
+      else {
+        var st = /style\s*=\s*"([^"]*)"/i.exec(t[3])
+        stack.push(richMarks(st ? st[1] : ""))
+      }
+    }
+    richAdd(acc, richUnescape(inner.slice(at)), richMarksNow(stack, anchors, heading))
+    richFlush(acc)
+  }
+  acc.map.push(acc.out.length)
+  return { text: acc.out, map: acc.map }
+}
+
+// Where a place on the screen stands in the markdown, and back again.
+function sourceAt(map, pos) {
+  if (!map || map.length === 0) return pos
+  return map[clamp(pos, 0, map.length - 1)]
+}
+
+function renderedAt(map, src) {
+  if (!map || map.length === 0) return src
+  for (var i = 0; i < map.length; i++) if (map[i] >= src) return i
+  return map.length - 1
+}
+
 // -------------------------------------------------------------------- undo
 
 // How many deleted notes Ctrl+Z can bring back, newest first.
@@ -806,6 +1109,39 @@ function nearestOther(placements, id) {
   for (var k in placements) if (k !== id) rest[k] = placements[k]
   var c = center(gone)
   return nearestTo(rest, c.x, c.y)
+}
+
+// One screen's notes in the order the grid reads them -- along the row and
+// on to the next -- which is the order tileNotes fills it in, so Tab walks
+// the board the way your eye does. Sorted by the same comparator, so the two
+// can never disagree about what "next" means.
+function gridOrder(placements, screenName) {
+  var list = []
+  for (var id in placements) {
+    var p = placements[id]
+    if (screenName && p.screenName !== screenName) continue
+    list.push(p)
+  }
+  list.sort(function(a, b) {
+    if (Math.abs(a.ly - b.ly) > 40) return a.ly - b.ly
+    return a.lx - b.lx
+  })
+  var out = []
+  for (var i = 0; i < list.length; i++) out.push(list[i].id)
+  return out
+}
+
+// Tab, and Shift+Tab: a step along the grid from the note you are on,
+// round to the first again at the end. The grid is a screen's own, so this
+// stays on that screen; Alt + arrow is what crosses to another.
+function nextInGrid(placements, fromId, step) {
+  var from = placements[fromId]
+  var order = gridOrder(placements, from ? from.screenName : "")
+  if (order.length === 0) return fromId
+  var at = order.indexOf(fromId)
+  if (at < 0) return order[0]
+  var n = order.length
+  return order[((at + step) % n + n) % n]
 }
 
 // The next note one arrow away, across every screen: the closest one that

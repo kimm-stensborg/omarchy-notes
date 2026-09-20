@@ -20,9 +20,11 @@ import "Model.js" as Model
 //
 // The text is a small markdown dialect -- headings, bullets, numbered lines,
 // checkboxes, inline bold / italic / underline / strike / code, and web links
-// you can click. The card renders it and
-// the editor shows the plain text, with Ctrl shortcuts that write the marks
-// for you (see the README).
+// you can click. The card renders it, and so does the editor: writing in a
+// note shows bold bold and takes the "# " off a heading, while the markers
+// that build a list stay as you typed them, since they are how you go on
+// typing it. Ctrl+M shows the markdown itself. Ctrl shortcuts write the
+// marks for you (see the README).
 Item {
   id: card
 
@@ -31,6 +33,39 @@ Item {
   property var store: null
   property var host: null
   property string fontFamily: Style.font.menuFamily
+
+  // Writing in a note shows the marks done rather than written -- **bold**
+  // comes out bold and the "# " comes off a heading. Ctrl+M shows the plain
+  // markdown instead, for this note and while you are in it; every note
+  // opens formatted.
+  property bool rawMode: false
+  // Set while the editor is being filled, so putting text into it is not
+  // mistaken for you typing it.
+  property bool loading: false
+  // From where things are on the screen to where they stand in the text.
+  property var shownMap: null
+  // The line the caret was last on: leaving a line is when what you wrote on
+  // it gets drawn.
+  property int lastLine: -1
+
+  // What code is tinted with while you write. It is what tells a code span
+  // from a link when the text comes back out of the editor, so it is a
+  // colour rather than a font: the note's own font is monospace already.
+  readonly property string codeBackHex: {
+    var b = card.background, f = card.foreground
+    function mix(x, y) { return Math.round((x + (y - x) * 0.16) * 255) }
+    var n = mix(b.r, f.r) * 65536 + mix(b.g, f.g) * 256 + mix(b.b, f.b)
+    return "#" + ("000000" + n.toString(16)).slice(-6)
+  }
+
+  readonly property var richOpts: ({
+    accentHex: card.accentHex,
+    codeBackHex: card.codeBackHex,
+    textSize: card.textSize,
+    headingSize: card.headingSize,
+    lineGap: Style.spacing.xs,
+    headGap: Style.spacing.md
+  })
 
   readonly property var note: card.store ? card.store.get(card.noteId) : null
   readonly property var placement: card.overlay ? card.overlay.placements[card.noteId] : null
@@ -163,11 +198,86 @@ Item {
   // Editing can also start from Enter on the selected note, so loading the
   // text hangs off the state, not off the click.
   function beginEditor() {
-    editor.text = card.note ? card.note.text : ""
+    card.loading = true
+    card.rawMode = false
+    if (card.overlay) card.overlay.rawEditing = false
+    card.lastLine = -1
+    card.fillEditor(card.note ? card.note.text : "", -1)
     Qt.callLater(function() {
       editor.forceActiveFocus()
       editor.cursorPosition = editor.length
     })
+  }
+
+  // The note into the editor, formatted or plain. The caret is given where
+  // it belongs in the text rather than where it stood on the screen, so it
+  // does not slide about when the marks appear or go.
+  //   src: where in the markdown to leave the caret; -1 for the end
+  function fillEditor(text, src) {
+    card.loading = true
+    var pos
+    if (card.rawMode) {
+      card.shownMap = null
+      editor.text = text
+      pos = src < 0 ? text.length : src
+    } else {
+      var r = Model.richHtml(text, card.richOpts)
+      card.shownMap = r.map
+      editor.text = r.html
+      pos = src < 0 ? r.map.length - 1 : Model.renderedAt(r.map, src)
+    }
+    editor.cursorPosition = Math.max(0, Math.min(editor.length, pos))
+    card.loading = false
+  }
+
+  // What is in the editor as the note's markdown, with the map back to it.
+  function editorSource() {
+    return card.rawMode ? { text: editor.text, map: null } : Model.richParse(editor.text)
+  }
+
+  // A change made to the markdown itself -- a mark written for you, a list
+  // carried on -- saved and then drawn again.
+  function applySource(text, from, to) {
+    card.store.update(card.noteId, { text: text })
+    card.lastLine = Model.lineIndexAt(text, from < 0 ? text.length : from)
+    card.fillEditor(text, from)
+    if (to !== undefined && to !== from) {
+      var end = card.rawMode ? to : Model.renderedAt(card.shownMap, to)
+      editor.select(editor.cursorPosition, end)
+    }
+  }
+
+  // Ctrl+M: the marks written out, and back again. Where you stand in the
+  // text is kept, so the caret does not jump when the view changes under it.
+  function toggleRaw() {
+    var cur = card.editorSource()
+    var pos = Model.sourceAt(cur.map, editor.cursorPosition)
+    // Changing which format the editor is in makes it read the text it is
+    // holding all over again, and that must not arrive as if you had typed
+    // it: the note is still the markdown, whichever way it is being shown.
+    card.loading = true
+    card.rawMode = !card.rawMode
+    if (card.overlay) card.overlay.rawEditing = card.rawMode
+    card.lastLine = Model.lineIndexAt(cur.text, pos)
+    card.fillEditor(cur.text, pos)
+  }
+
+  // Marks typed by hand are drawn when you leave the line they are on --
+  // the moment you have finished saying it. While you are still on the line
+  // the text is left exactly as you are typing it, so nothing shifts under
+  // the caret mid-word.
+  function renderOnLeaving() {
+    if (card.rawMode || card.loading || !card.editing) return
+    var cur = card.editorSource()
+    var pos = Model.sourceAt(cur.map, editor.cursorPosition)
+    var line = Model.lineIndexAt(cur.text, pos)
+    if (line === card.lastLine) return
+    var was = card.lastLine
+    card.lastLine = line
+    if (was < 0) return
+    var left = cur.text.split("\n")[was]
+    if (left === undefined || Model.richPlain(left) === left) return
+    card.applySource(cur.text, pos)
   }
 
   function remindIn(text) {
@@ -241,20 +351,21 @@ Item {
       start = editor.selectionStart
       end = editor.selectionEnd
     }
-    var r = Model.wrapSelection(editor.text, start, end, marker)
-    editor.text = r.text
-    editor.select(r.selStart, r.selEnd)
+    var cur = card.editorSource()
+    var r = Model.wrapSelection(cur.text, Model.sourceAt(cur.map, start),
+                                Model.sourceAt(cur.map, end), marker)
+    card.applySource(r.text, r.selStart, r.selEnd)
   }
 
   // Ctrl+1 and friends: put a block mark on the line the cursor is in.
   // Ctrl+N numbers it, counting on from the line above.
   function prefixLine(prefix) {
-    var pos = editor.cursorPosition
-    var was = editor.text
-    var index = Model.lineIndexAt(was, pos)
-    var next = prefix === "1. " ? Model.toggleNumber(was, index) : Model.togglePrefix(was, index, prefix)
-    editor.text = next
-    editor.cursorPosition = Math.max(0, Math.min(next.length, pos + next.length - was.length))
+    var cur = card.editorSource()
+    var pos = Model.sourceAt(cur.map, editor.cursorPosition)
+    var index = Model.lineIndexAt(cur.text, pos)
+    var next = prefix === "1. " ? Model.toggleNumber(cur.text, index)
+      : Model.togglePrefix(cur.text, index, prefix)
+    card.applySource(next, Math.max(0, Math.min(next.length, pos + next.length - cur.text.length)))
   }
 
   // Enter in a list starts the next item, and Enter on an empty item ends
@@ -262,12 +373,30 @@ Item {
   // text, so Ctrl+Z in the note takes it back like any other typing.
   function continueList() {
     if (editor.selectedText !== "") return false
-    var was = editor.text
-    var r = Model.continueList(was, editor.cursorPosition)
+    var cur = card.editorSource()
+    var pos = Model.sourceAt(cur.map, editor.cursorPosition)
+    var r = Model.continueList(cur.text, pos)
     if (!r) return false
-    if (r.text.length > was.length) editor.insert(editor.cursorPosition, r.text.slice(editor.cursorPosition, r.cursor))
-    else editor.remove(r.cursor, r.cursor + was.length - r.text.length)
-    editor.cursorPosition = r.cursor
+    if (card.rawMode) {
+      if (r.text.length > cur.text.length) editor.insert(pos, r.text.slice(pos, r.cursor))
+      else editor.remove(r.cursor, r.cursor + cur.text.length - r.text.length)
+      editor.cursorPosition = r.cursor
+    } else {
+      card.applySource(r.text, r.cursor)
+    }
+    return true
+  }
+
+  // Enter at the end of a heading starts a plain line. Qt carries a block
+  // format on to the line it makes, which would write another "# " into the
+  // note -- the size belongs to the heading, not to what comes after it.
+  function breakHeading() {
+    if (card.rawMode || editor.selectedText !== "") return false
+    var cur = card.editorSource()
+    var pos = Model.sourceAt(cur.map, editor.cursorPosition)
+    var index = Model.lineIndexAt(cur.text, pos)
+    if (!/^#{1,3} /.test(cur.text.split("\n")[index] || "")) return false
+    card.applySource(cur.text.slice(0, pos) + "\n" + cur.text.slice(pos), pos + 1)
     return true
   }
 
@@ -554,7 +683,9 @@ Item {
           id: editor
           width: editFlick.width
           height: Math.max(implicitHeight, editFlick.height)
-          textFormat: TextEdit.PlainText
+          // Formatted while you write, unless Ctrl+M has asked for the
+          // markdown itself. The note on disk is markdown either way.
+          textFormat: card.rawMode ? TextEdit.PlainText : TextEdit.RichText
           wrapMode: TextEdit.Wrap
           selectByMouse: true
           color: card.foreground
@@ -569,9 +700,11 @@ Item {
           onSelectedTextChanged: if (card.editing) card.overlay.textSelected = editor.selectedText !== ""
 
           onTextChanged: {
-            if (card.editing && card.note && text !== card.note.text)
-              card.store.update(card.noteId, { text: text })
+            if (card.loading || !card.editing || !card.note) return
+            var written = card.rawMode ? text : Model.richParse(text).text
+            if (written !== card.note.text) card.store.update(card.noteId, { text: written })
           }
+          onCursorPositionChanged: card.renderOnLeaving()
           onActiveFocusChanged: if (!activeFocus && card.overlay && card.overlay.editingId === card.noteId) card.overlay.editingId = ""
           Keys.onEscapePressed: card.stopEdit()
 
@@ -620,10 +753,16 @@ Item {
             // Enter in a list carries it on. Shift + Enter is a plain new line.
             if (!(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.ShiftModifier))
                 && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)) {
-              if (card.continueList()) event.accepted = true
+              if (card.continueList() || card.breakHeading()) event.accepted = true
               return
             }
             if (!(event.modifiers & Qt.ControlModifier)) return
+            // Ctrl+M: the marks as they are written, and back again.
+            if (event.key === Qt.Key_M) {
+              card.toggleRaw()
+              event.accepted = true
+              return
+            }
             var marker = ""
             if (event.key === Qt.Key_B) marker = "**"
             else if (event.key === Qt.Key_I) marker = "*"

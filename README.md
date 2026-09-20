@@ -24,7 +24,11 @@ border and font, with Hyprland's corner rounding.
   board with nothing on it -- the first time you open Notes, or the moment
   you delete the last note -- puts one out for you, open in the middle and
   ready to type in, rather than showing you an empty screen.
-- **Writing:** click a note to write in it, or press `Enter` on it. It
+- **Writing:** click a note to write in it, or press `Enter` on it. What
+  you are writing stays formatted as you write it -- bold is bold, and a
+  heading is a heading, rather than a line of `#` and `**` to read past.
+  `Ctrl + M` shows the markdown itself when you want to see the marks, and
+  again puts them back. The note
   lifts out to the middle of its screen and is shown at twice the size,
   so what you are writing is the thing in front of you rather than one card
   among many; `Esc` -- or `Alt+Enter`, the other half of the `Enter` that
@@ -41,7 +45,11 @@ border and font, with Hyprland's corner rounding.
   stand in its height and the columns share out its width, so the grid
   fits whatever screen it is on and meets both edges. Past three rows the
   board scrolls -- the wheel over the glass between the notes, and arrowing
-  onto a note below the fold brings it up. Tiling moves no note on disk, so
+  onto a note below the fold brings it up. `Tab` walks the grid in the order
+  it reads -- along the row and on to the next, round to the first again at
+  the end -- and `Shift + Tab` the other way. The grid is each screen's own,
+  so `Tab` stays on the screen you are looking at; `Alt + arrow` is still
+  what crosses to another. Tiling moves no note on disk, so
   nothing is lost, but the grid itself is remembered until you press `Alt+T`
   again -- hiding the board, or restarting the shell, leaves it be. Moving a
   note by hand also ends the tiled view.
@@ -74,8 +82,10 @@ border and font, with Hyprland's corner rounding.
 
 ## Formatting
 
-Notes are written in a small markdown dialect. A note shows it formatted and
-puts the plain text back the moment you click into it.
+Notes are written in a small markdown dialect, and shown formatted whether
+you are reading them or writing in them. `Ctrl + M` shows a note's markdown
+as it is written down instead, for that note and for as long as you are in
+it; the next note you open is formatted again.
 
 | Write | Key | Shows as |
 |---|---|---|
@@ -95,6 +105,15 @@ asking what can be done to it. Every key toggles, so pressing it again takes
 the mark off. With nothing
 selected, `Ctrl + B` and friends take the word the cursor is in. Ticked
 lines are dimmed and struck through, and `- [ ] task` works too.
+
+The marks you write by hand are done as you leave the line they are on,
+which is the moment you have finished saying it -- while you are still on
+the line, what you typed stays exactly as you typed it, so nothing shifts
+under the cursor mid-word. The markers that build a list -- `- `, `1. `,
+`[ ] ` -- stay in front of the line while you write, since they are how you
+go on typing the list; the card puts them out as bullets and boxes when you
+leave. Your notes are markdown on disk either way, and what you wrote comes
+back character for character: your own numbering, your own spacing.
 
 `Ctrl + N` counts on from the line above, so pressing it down a list numbers
 it 1, 2, 3. `Enter` in a list starts the next item -- the same bullet, the
@@ -140,7 +159,9 @@ Your notes stay in `~/Documents/notes.json`.
 | `PageUp` `PageDown` | Jump to the top or the foot of the note |
 | `Enter` | Write in the note you are on, shown big in the middle |
 | `Alt + Enter` | Put a note shown on its own back where it lives |
+| `Ctrl + M` | Show the markdown as it is written, and back to formatted |
 | `Alt + R` | Set or clear a reminder on the note you are on |
+| `Tab` `Shift + Tab` | Walk the grid, in the order it reads; only while tiled |
 | `Alt + T` | Line every note up in a grid on its own screen, and back again |
 | `Del` | Delete the note you are on, after a yes or no |
 | `Alt + Del` | The same from inside a note, where `Del` is the text's |
@@ -164,7 +185,7 @@ note and moves to the next one.
 | File | What |
 |---|---|
 | `~/Documents/notes.json` | Your notes, their reminders, and whether the board is tiled. Plain JSON, written atomically, safe to edit by hand; the board picks up the change. |
-| `Model.js` | File format, monitor identity, placement, tiling, reminder times and markdown logic |
+| `Model.js` | File format, monitor identity, placement, tiling and the order it reads, reminder times, and markdown both ways -- rendered for the card, and to and from the rich text the editor holds |
 | `Store.qml` | Service: loads and saves the file, watches the clock for reminders, and knows which monitor is which |
 | `Overlay.qml` / `NoteWindow.qml` / `Note.qml` | The board: one window per screen, and the notes on it |
 

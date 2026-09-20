@@ -67,16 +67,19 @@ PanelWindow {
               ["Ctrl + D", "strike"], ["Ctrl + E", "code"], ["Ctrl + 1", "heading"],
               ["Ctrl + L", "bullet"], ["Ctrl + N", "numbered"], ["Ctrl + K", "task"]]
     if (o.editingId !== "")
-      return [["Alt + Enter", "put it back"], ["Ctrl + B", "bold"], ["Alt + R", "remind"],
-              ["Alt + Del", "delete"]]
+      return [["Alt + Enter", "put it back"], ["Ctrl + B", "bold"],
+              ["Ctrl + M", o.rawEditing ? "formatted" : "markdown"],
+              ["Alt + R", "remind"], ["Alt + Del", "delete"]]
     if (o.zoomedId !== "")
       return [["Alt + Enter", "put it back"], ["Enter", "write"], ["Alt + R", "remind"],
               ["Alt + Del", "delete"]]
     var gone = win.store ? win.store.deletedCount : 0
     var undo = gone > 0 ? [["Ctrl + Z", gone > 1 ? "undo delete · " + gone : "undo the delete"]] : []
     if (o.selectedId !== "" && o.placements[o.selectedId])
-      return undo.concat([["Enter", "open it"], ["Alt + ← →", "next note"], ["Alt + R", "remind"],
-                          ["Del", "delete"], ["Alt + T", o.tiled ? "let them flow" : "tile"]])
+      return undo.concat([["Enter", "open it"], ["Alt + ← →", "next note"]])
+        .concat(o.tiled ? [["Tab", "along the grid"]] : [])
+        .concat([["Alt + R", "remind"], ["Del", "delete"],
+                 ["Alt + T", o.tiled ? "let them flow" : "tile"]])
     return undo.concat([["N", "new note"], ["Alt + ← →", "pick one"],
                         ["Alt + T", o.tiled ? "let them flow" : "tile"], ["Esc", "close"]])
   }
@@ -320,6 +323,14 @@ PanelWindow {
         win.overlay.moveSelection(event.key === Qt.Key_Left ? "left"
           : event.key === Qt.Key_Right ? "right"
           : event.key === Qt.Key_Up ? "up" : "down")
+        event.accepted = true
+      } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+        // Tab walks the grid. It is taken whether the notes are tiled or
+        // not, so it never falls through to Qt's own focus walking and
+        // carries the keyboard off the board.
+        var backward = event.key === Qt.Key_Backtab
+          || (event.modifiers & Qt.ShiftModifier) !== 0
+        win.overlay.cycleSelection(backward ? -1 : 1)
         event.accepted = true
       } else if (alt && event.key === Qt.Key_T) {
         win.overlay.toggleTile()

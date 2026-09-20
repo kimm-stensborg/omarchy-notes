@@ -45,7 +45,10 @@ Item {
   // Whether the note being written in has text selected. Selecting something
   // is asking what can be done to it, so the toolbar answers with the marks.
   property bool textSelected: false
-  onEditingIdChanged: root.textSelected = false
+  // Ctrl+M in a note: the markdown itself rather than the marks done. It
+  // lives here so the toolbar can say which of the two you are looking at.
+  property bool rawEditing: false
+  onEditingIdChanged: { root.textSelected = false; root.rawEditing = false }
   // What the arrows move, Enter opens and Del deletes.
   property string selectedId: ""
   // The note waiting on a yes/no before it is deleted.
@@ -355,6 +358,23 @@ Item {
     var s = root.screenInfo(root.effectiveActive)
     if (!s) return
     root.select(Model.nearestTo(p, s.x + s.width / 2, s.y + s.height / 2))
+  }
+
+  // Tab: a step along the grid, in the order it reads, round to the first
+  // again at the end. Only in the grid -- notes left to flow are where you
+  // put them, and "the next one" is not a thing the board could say.
+  // With nothing in hand it starts at the near end of the screen you are on.
+  function cycleSelection(step) {
+    if (!root.tiled) return false
+    var p = root.placements
+    if (root.selectedId && p[root.selectedId]) {
+      root.select(Model.nextInGrid(p, root.selectedId, step))
+      return true
+    }
+    var order = Model.gridOrder(p, root.effectiveActive)
+    if (order.length === 0) return false
+    root.select(step < 0 ? order[order.length - 1] : order[0])
+    return true
   }
 
   // The arrows scroll the note you are on; the card that owns the id acts

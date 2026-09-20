@@ -255,6 +255,121 @@ test("inlineMarkup escapes, then styles", () => {
   assert.strictEqual(M.inlineMarkup("<script>", A), "&lt;script&gt;")
 })
 
+// ------------------------------------------------------- rich editing
+
+const RICH = { accentHex: "#ff0000", codeBackHex: "#333333", textSize: 16, headingSize: 28, lineGap: 3, headGap: 8 }
+
+test("richPlain hides the inline marks and the heading's, keeps the list's", () => {
+  assert.strictEqual(M.richPlain("**b** and *i* and __u__ and ~~s~~ and `c`"),
+    "b and i and u and s and c")
+  assert.strictEqual(M.richPlain("# Shopping"), "Shopping")
+  assert.strictEqual(M.richPlain("### Deep"), "Deep")
+  // The markers that build a list are how you go on typing it.
+  assert.strictEqual(M.richPlain("- milk\n1) one\n[ ] task\n  - [x] done"),
+    "- milk\n1) one\n[ ] task\n  - [x] done")
+  // Only "# " exactly, with nothing in front, is a heading to hide.
+  assert.strictEqual(M.richPlain("#not a heading"), "#not a heading")
+  assert.strictEqual(M.richPlain(" # indented"), " # indented")
+  // An address is shown as written, marks inside it left alone.
+  assert.strictEqual(M.richPlain("see www.a_b.com/x_y ok"), "see www.a_b.com/x_y ok")
+  assert.strictEqual(M.richPlain("snake_case_word stays"), "snake_case_word stays")
+})
+
+test("richHtml gives every shown character a place in the markdown", () => {
+  const md = "# Head\n- milk, the **good** kind\n\nplain"
+  const r = M.richHtml(md, RICH)
+  const shown = M.richPlain(md)
+  assert.strictEqual(r.map.length, shown.length + 1)
+  // The first shown character is the "H" of Head, two along from the "#".
+  assert.strictEqual(r.map[0], 2)
+  assert.strictEqual(md[r.map[0]], "H")
+  // Every shown character stands on the same character in the markdown.
+  for (let i = 0; i < shown.length; i++)
+    if (shown[i] !== "\n") assert.strictEqual(md[r.map[i]], shown[i], `at ${i}`)
+  // The marks are carried by spans, not written out.
+  assert.ok(r.html.indexOf("font-weight:700") > 0)
+  assert.ok(r.html.indexOf("**") < 0)
+})
+
+test("richHtml tints code rather than giving it a font of its own", () => {
+  // The note's own font is monospace, so a monospace span would say nothing
+  // and code would come back as plain text.
+  const r = M.richHtml("run `ls` now, see www.x.dk", RICH)
+  assert.ok(r.html.indexOf("background-color:#333333") > 0)
+  assert.ok(r.html.indexOf("font-family") < 0)
+  // A link wears the accent colour alone, which is what tells the two apart.
+  assert.strictEqual(M.richMarks("color:#ff0000;").code, false)
+  assert.strictEqual(M.richMarks("color:#ff0000; background-color:#333333;").code, true)
+})
+
+test("richHtml says an empty line the way Qt says one", () => {
+  // An empty block with nothing in it is dropped, and a bare <br /> would be
+  // a character you could put the caret after but never see.
+  const r = M.richHtml("a\n\nb", RICH)
+  assert.ok(r.html.indexOf("-qt-paragraph-type:empty") > 0)
+  assert.strictEqual(r.map.length, M.richPlain("a\n\nb").length + 1)
+})
+
+// The document Qt hands back for that note, captured from a real TextEdit.
+const QT_HTML = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html><head><meta name="qrichtext" content="1" /><meta charset="utf-8" /><style type="text/css">
+p, li { white-space: pre-wrap; }
+hr { height: 1px; border-width: 0; }
+li.unchecked::marker { content: "\\2610"; }
+li.checked::marker { content: "\\2612"; }
+</style></head><body style=" font-family:'monospace'; font-size:15px; font-weight:400; font-style:normal;">
+<h1 style=" margin-top:0px; margin-bottom:3px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><span style=" font-size:xx-large; font-weight:700;">Shopping</span></h1>
+<p style=" margin-top:0px; margin-bottom:3px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">- milk, the <span style=" font-weight:700;">good</span> kind</p>
+<p style="-qt-paragraph-type:empty; margin-top:0px; margin-bottom:3px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;"><br /></p>
+<p style=" margin-top:0px; margin-bottom:3px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">- [ ] call the bank at <span style=" color:#f38d70; background-color:#3a3330;">9</span></p>
+<p style=" margin-top:0px; margin-bottom:3px; margin-left:0px; margin-right:0px; -qt-block-indent:0; text-indent:0px;">2) parcel at <span style=" font-style:italic;">dusk</span>, see <span style=" color:#f38d70;">www.post.dk</span></p></body></html>`
+
+test("richParse reads the HTML Qt writes back as the note's markdown", () => {
+  // Captured with the note's own font -- monospace -- so code surviving as
+  // code is the real question here, not an easy one.
+  assert.ok(QT_HTML.indexOf("font-family:'monospace'") > 0)
+  const back = M.richParse(QT_HTML)
+  assert.strictEqual(back.text,
+    "# Shopping\n- milk, the **good** kind\n\n- [ ] call the bank at `9`\n2) parcel at *dusk*, see www.post.dk")
+  assert.strictEqual(back.map.length, M.richPlain(back.text).length + 1)
+  // A heading is written bold by its tag; that is not a mark the note made.
+  assert.ok(back.text.indexOf("**Shopping**") < 0)
+})
+
+test("richParse leaves plain markdown -- the Ctrl+M view -- as it is", () => {
+  const md = "# Head\n- **milk**"
+  const back = M.richParse(md)
+  assert.strictEqual(back.text, md)
+  assert.strictEqual(back.map.length, md.length + 1)
+})
+
+test("sourceAt and renderedAt find each other across the hidden marks", () => {
+  const md = "# Head\nthe **good** kind"
+  const map = M.richHtml(md, RICH).map
+  // The caret in front of "good" on the screen is after the "**" in the text.
+  const shown = M.richPlain(md)
+  const g = shown.indexOf("good")
+  assert.strictEqual(M.sourceAt(map, g), md.indexOf("good"))
+  assert.strictEqual(M.renderedAt(map, md.indexOf("good")), g)
+  // Past the end, and before the first hidden mark, stay inside the text.
+  assert.strictEqual(M.sourceAt(map, 9999), md.length)
+  assert.strictEqual(M.renderedAt(map, 0), 0)
+})
+
+test("a mark written for you lands on the text, not on what is shown", () => {
+  // Ctrl+B with "good" held on the screen, from the note's own HTML.
+  const md = "the good kind"
+  const map = M.richHtml(md, RICH).map
+  const shown = M.richPlain(md)
+  const a = shown.indexOf("good"), b = a + 4
+  const r = M.wrapSelection(md, M.sourceAt(map, a), M.sourceAt(map, b), "**")
+  assert.strictEqual(r.text, "the **good** kind")
+  const next = M.richHtml(r.text, RICH)
+  // and the selection is still round "good" once the note is drawn again
+  assert.strictEqual(M.renderedAt(next.map, r.selStart), a)
+  assert.strictEqual(M.renderedAt(next.map, r.selEnd), b)
+})
+
 const GRID = { gap: 10, top: 96 }
 
 test("tileGrid measures the cell from the screen and fills both edges", () => {
@@ -270,6 +385,41 @@ test("tileGrid measures the cell from the screen and fills both edges", () => {
     assert.ok(bottom <= s.height, `${s.height}: rows reach ${bottom}`)
     assert.ok(s.height - bottom < g.pitchY, `${s.height}: a fourth row would fit`)
   }
+})
+
+test("gridOrder reads the grid the way tileNotes fills it", () => {
+  // Scattered on two screens, in no particular order.
+  const notes = [
+    note("c", DP5, 0.5, 0.5), note("a", DP5, 0.05, 0.05), note("b", DP5, 0.4, 0.06),
+    note("z", DP7, 0.2, 0.6), note("y", DP7, 0.02, 0.04)
+  ]
+  const tiled = M.tileNotes(notes, [DP5, DP7], DP5.key, GRID)
+  const order = M.gridOrder(tiled, "DP-5")
+  // One screen's own notes, along the row and on to the next.
+  assert.strictEqual(order.join(","), "a,b,c")
+  assert.strictEqual(M.gridOrder(tiled, "DP-7").join(","), "y,z")
+  // The cells they were given are in that same order.
+  for (let i = 1; i < order.length; i++) {
+    const p = tiled[order[i - 1]], q = tiled[order[i]]
+    assert.ok(p.ly < q.ly || (Math.abs(p.ly - q.ly) <= 40 && p.lx < q.lx))
+  }
+})
+
+test("nextInGrid steps along the grid and round at the ends", () => {
+  const notes = [note("a", DP5, 0.05, 0.05), note("b", DP5, 0.4, 0.06), note("c", DP5, 0.5, 0.5),
+                 note("y", DP7, 0.02, 0.04), note("z", DP7, 0.2, 0.6)]
+  const tiled = M.tileNotes(notes, [DP5, DP7], DP5.key, GRID)
+  assert.strictEqual(M.nextInGrid(tiled, "a", 1), "b")
+  assert.strictEqual(M.nextInGrid(tiled, "b", 1), "c")
+  // round to the first again rather than stopping at the end
+  assert.strictEqual(M.nextInGrid(tiled, "c", 1), "a")
+  assert.strictEqual(M.nextInGrid(tiled, "a", -1), "c")
+  // Tab stays on the screen the note is on; Alt + arrow is what crosses.
+  assert.strictEqual(M.nextInGrid(tiled, "z", 1), "y")
+  assert.strictEqual(M.nextInGrid(tiled, "y", 1), "z")
+  // A note that is not on the board leaves you at the near end of one.
+  assert.strictEqual(M.nextInGrid(tiled, "gone", 1), "a")
+  assert.strictEqual(M.nextInGrid({}, "a", 1), "a")
 })
 
 test("tileGrid keeps a cell near a note's own four-to-five shape", () => {
