@@ -127,10 +127,12 @@ Item {
       : Border.surfaceSpec("menu", "border", Color.menu.border, card.borderWidth))
 
   // Reading sizes. A note is read at arm's length rather than glanced at in
-  // the bar, so the body is two steps up from it and a heading is half as
-  // big again, which is the gap that makes a heading read as one.
-  readonly property int textSize: Style.font.heading
-  readonly property int headingSize: Style.font.display
+  // the bar, so the body is a step up from it, and a heading half as big
+  // again -- the gap that makes a heading read as one. The heading is taken
+  // from the body rather than from a token of its own, so the two keep that
+  // gap wherever the body lands.
+  readonly property int textSize: Style.font.title
+  readonly property int headingSize: Math.round(card.textSize * 1.5)
 
   // The card's padding. The corner labels -- the reminder, and the monitor a
   // borrowed note is away from -- live in the band reserved at the foot of
