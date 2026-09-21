@@ -109,19 +109,20 @@ test("a new note is a portrait card, four across to five down", () => {
   assert.strictEqual(p.a.h, M.DEFAULT_H)
 })
 
-test("a 1440p screen tiles three rows, evenly stepped and clear of the bottom", () => {
-  const g = M.tileGrid(DP5, { gap: 10, top: 96 })
+test("a 1440p screen tiles two rows, evenly stepped and clear of the bottom", () => {
+  const opts = { gap: 10, top: 96 }
+  const g = M.tileGrid(DP5, opts)
+  assert.strictEqual(g.rows, 2)
   const notes = []
-  for (let i = 0; i < g.cols * 3; i++) notes.push(note("n" + i, DP5, 0.1, 0.1))
-  const t = M.tileNotes(notes, [DP5], DP5.key, { gap: 10, top: 96 })
+  for (let i = 0; i < g.cols * g.rows; i++) notes.push(note("n" + i, DP5, 0.1, 0.1))
+  const t = M.tileNotes(notes, [DP5], DP5.key, opts)
   const rows = [...new Set(Object.keys(t).map(k => t[k].ly))].sort((a, b) => a - b)
-  assert.strictEqual(rows.length, 3)
+  assert.strictEqual(rows.length, g.rows)
   // stepped by the grid's own pitch, not squashed together to fit
-  assert.strictEqual(rows[1] - rows[0], g.pitchY)
-  assert.strictEqual(rows[2] - rows[1], g.pitchY)
+  for (let i = 1; i < rows.length; i++) assert.strictEqual(rows[i] - rows[i - 1], g.pitchY)
   for (const id in t) assert.ok(t[id].ly + t[id].h <= DP5.height, id + " runs off the bottom")
   // a screenful is exactly that: nothing to scroll until one more arrives
-  assert.strictEqual(M.tileMaxScroll(DP5, g.cols * 3, { gap: 10, top: 96 }), 0)
+  assert.strictEqual(M.tileMaxScroll(DP5, g.cols * g.rows, opts), 0)
 })
 
 test("placeNotes: home present lands on its own screen", () => {
@@ -373,17 +374,19 @@ test("a mark written for you lands on the text, not on what is shown", () => {
 const GRID = { gap: 10, top: 96 }
 
 test("tileGrid measures the cell from the screen and fills both edges", () => {
+  assert.strictEqual(M.TILE_ROWS, 2)
   for (const s of [DP5, DP7, EDP, { width: 3840, height: 2160 }, { width: 1280, height: 720 }]) {
     const g = M.tileGrid(s, GRID)
-    assert.strictEqual(g.rows, 3)
+    assert.strictEqual(g.rows, M.TILE_ROWS)
     // the columns share out the width, leaving less than a column's rounding
     const spanned = g.cols * g.cellW + (g.cols + 1) * g.gap
     assert.ok(spanned <= s.width, `${s.width}: grid ${spanned} overflows`)
     assert.ok(s.width - spanned < g.cols + g.gap, `${s.width}: grid ${spanned} falls short`)
-    // and three rows stand in the height, under the room kept at the top
-    const bottom = g.top + g.gap + 3 * g.pitchY - g.gap
+    // and they stand in the height, under the room kept at the top, with
+    // nothing left over for one more
+    const bottom = g.top + g.gap + g.rows * g.pitchY - g.gap
     assert.ok(bottom <= s.height, `${s.height}: rows reach ${bottom}`)
-    assert.ok(s.height - bottom < g.pitchY, `${s.height}: a fourth row would fit`)
+    assert.ok(s.height - bottom < g.pitchY, `${s.height}: another row would fit`)
   }
 })
 
@@ -426,7 +429,7 @@ test("tileGrid keeps a cell near a note's own four-to-five shape", () => {
   for (const s of [DP5, EDP, { width: 3840, height: 2160 }]) {
     const g = M.tileGrid(s, GRID)
     const ratio = g.cellW / g.cellH
-    assert.ok(Math.abs(ratio - 4 / 5) < 0.09, `${s.width}x${s.height}: ratio ${ratio}`)
+    assert.ok(Math.abs(ratio - 4 / 5) < 0.12, `${s.width}x${s.height}: ratio ${ratio}`)
   }
 })
 

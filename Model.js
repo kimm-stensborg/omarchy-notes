@@ -8,8 +8,8 @@
 var VERSION = 1
 // A note stands as a portrait card, four across to five down, and small
 // enough that a 1440p screen tiles three rows of them with room to spare.
-var DEFAULT_W = 320
-var DEFAULT_H = 400
+var DEFAULT_W = 480
+var DEFAULT_H = 600
 var MIN_W = 140
 var MIN_H = 100
 var MAX_W = 1600
@@ -268,8 +268,9 @@ function freeSpot(lx, ly, w, h, s, taken) {
 
 // How many rows of notes a screen shows at once. Past this the board
 // scrolls rather than shrinking the notes any further -- a note too small
-// to read is not a note.
-var TILE_ROWS = 3
+// to read is not a note. Two rows of a screen's height is the size a note
+// wants to be read at; three made them cramped.
+var TILE_ROWS = 2
 
 // The grid a screen gets. The cell is measured from the screen itself:
 // three rows standing in its height, and as many columns across as sit

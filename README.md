@@ -41,9 +41,9 @@ border and font, with Hyprland's corner rounding.
   Hyprland moves windows, where the compositor lets it through.
 - **Tiling:** `Alt+T` lines every note up in a grid on its own screen,
   filled from the top left, and `Alt+T` again lets them flow back to where
-  they were. The cells are the screen's rather than the notes': three rows
+  they were. The cells are the screen's rather than the notes': two rows
   stand in its height and the columns share out its width, so the grid
-  fits whatever screen it is on and meets both edges. Past three rows the
+  fits whatever screen it is on and meets both edges. Past two rows the
   board scrolls -- the wheel over the glass between the notes, and arrowing
   onto a note below the fold brings it up. `Tab` walks the grid in the order
   it reads -- along the row and on to the next, round to the first again at
